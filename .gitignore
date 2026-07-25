@@ -1,3 +1,49 @@
+# Dependencies
 node_modules/
+
+# Build output
 out/
+dist/
+*.tsbuildinfo
+
+# Extension packages
 *.vsix
+
+# VS Code extension testing
+.vscode-test/
+.vscode-test-web/
+
+# Editor / IDE (launch.json is kept intentionally)
+.vscode/settings.json
+.vscode/tasks.json
+.idea/
+*.swp
+*.swo
+
+# Logs & diagnostics
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+coverage/
+.nyc_output/
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets.json
+
+# OS files
+.DS_Store
+._*
+Thumbs.db
+desktop.ini
+
+# Temp
+tmp/
+temp/
+*.tmp
+*.bak
