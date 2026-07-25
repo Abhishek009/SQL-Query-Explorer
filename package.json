@@ -1,0 +1,148 @@
+{
+  "name": "trino-explorer",
+  "displayName": "Trino Explorer",
+  "publisher": "BigTechTalk",
+  "description": "Connect to Trino and browse available catalogs.",
+  "version": "0.0.6",
+  "license": "MIT",
+  "icon": "icon.png",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "trino",
+    "sql",
+    "database",
+    "query",
+    "presto"
+  ],
+  "activationEvents": [
+    "onView:trinoCatalogs",
+    "onCommand:trino.connect",
+    "onCommand:trino.configureConnection"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "trino.connect",
+        "title": "Trino: Connect"
+      },
+      {
+        "command": "trino.configureConnection",
+        "title": "Trino: Configure Connection"
+      },
+      {
+        "command": "trino.openQuery",
+        "title": "Trino: New SQL Query",
+        "icon": "$(new-file)"
+      },
+      {
+        "command": "trino.runActiveSql",
+        "title": "Trino: Run SQL Query",
+        "icon": "$(play)"
+      },
+      {
+        "command": "trino.refreshCatalogs",
+        "title": "Trino: Refresh Catalogs",
+        "icon": "$(refresh)"
+      }
+    ],
+    "configuration": {
+      "title": "Trino Explorer",
+      "properties": {
+        "trino.connection.name": {
+          "type": "string",
+          "default": "Trino Connection",
+          "description": "Display name for this Trino connection in the Explorer."
+        },
+        "trino.connection.url": {
+          "type": "string",
+          "default": "http://localhost:8080",
+          "description": "Base URL of the Trino coordinator."
+        },
+        "trino.connection.user": {
+          "type": "string",
+          "default": "",
+          "description": "Trino user sent in the X-Trino-User header."
+        },
+        "trino.connection.catalog": {
+          "type": "string",
+          "default": "",
+          "description": "Optional catalog used for the session."
+        },
+        "trino.connection.schema": {
+          "type": "string",
+          "default": "",
+          "description": "Optional schema used for the session."
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "trino",
+          "title": "Trino",
+          "icon": "resources/trino.svg"
+        }
+      ]
+    },
+    "views": {
+      "trino": [
+        {
+          "id": "trinoCatalogs",
+          "name": "Catalogs"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "trino.refreshCatalogs",
+          "when": "view == trinoCatalogs",
+          "group": "navigation"
+        },
+        {
+          "command": "trino.openQuery",
+          "when": "view == trinoCatalogs",
+          "group": "navigation"
+        },
+        {
+          "command": "trino.configureConnection",
+          "when": "view == trinoCatalogs",
+          "group": "navigation"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "trino.runActiveSql",
+          "when": "resourceLangId == sql",
+          "group": "navigation"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "trino.runActiveSql",
+        "key": "cmd+enter",
+        "mac": "cmd+enter",
+        "linux": "ctrl+enter",
+        "win": "ctrl+enter",
+        "when": "editorTextFocus && resourceLangId == sql"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.9.2",
+    "typescript": "^5.3.0"
+  }
+}
