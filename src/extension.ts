@@ -97,7 +97,10 @@ class TrinoClient {
     private async readPage(response: Response): Promise<TrinoPage> {
         if (!response.ok) {
             const details = await response.text();
-            throw new Error(`Trino request failed (${response.status}): ${details || response.statusText}`);
+            if (/plain HTTP request was sent to HTTPS port/i.test(details)) {
+                throw new Error('The coordinator expects HTTPS on this port. Turn on "Enable SSL / HTTPS" in Configure Connection, or add ?SSL=true to the JDBC URL.');
+            }
+            throw new Error(`Trino request failed (${response.status}): ${summarize(details) || response.statusText}`);
         }
         return response.json() as Promise<TrinoPage>;
     }
@@ -108,6 +111,15 @@ function firstColumn(result: TrinoQueryResult): string[] {
         .map((row) => String(row[0] ?? ''))
         .filter(Boolean)
         .sort((left, right) => left.localeCompare(right));
+}
+
+/** Proxies answer with HTML error pages; show their text instead of the markup. */
+function summarize(body: string): string {
+    const text = /<html/i.test(body)
+        ? (/<title>([^<]+)<\/title>/i.exec(body)?.[1] ?? body.replace(/<[^>]*>/g, ' '))
+        : body;
+    const collapsed = text.replace(/\s+/g, ' ').trim();
+    return collapsed.length > 300 ? `${collapsed.slice(0, 300)}…` : collapsed;
 }
 
 function quoteIdentifier(identifier: string): string {
@@ -346,6 +358,7 @@ interface ParsedTrinoUrl extends Pick<ConnectionFormData, 'host' | 'port' | 'ssl
 }
 
 const JDBC_SCHEME = /^jdbc:(?:trino|presto):\/\//i;
+const TLS_PORTS = new Set(['443', '8443']);
 
 /**
  * Reads either an HTTP(S) coordinator URL or a Trino JDBC connection string.
@@ -368,8 +381,11 @@ function parseTrinoUrl(value: string): ParsedTrinoUrl | undefined {
         }
         return undefined;
     };
+    // A JDBC URL often omits SSL even when the coordinator sits behind TLS, so
+    // fall back to the conventional TLS ports unless SSL is explicitly disabled.
+    const ssl = parameter('ssl');
     const sslEnabled = isJdbc
-        ? /^true$/i.test(parameter('ssl') ?? '') || url.port === '443'
+        ? ssl === undefined ? TLS_PORTS.has(url.port) : /^true$/i.test(ssl)
         : url.protocol === 'https:';
     const [catalog = '', schema = ''] = url.pathname.replace(/^\//, '').split('/');
     return {
