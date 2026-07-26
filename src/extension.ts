@@ -337,8 +337,8 @@ function expandPastedUrl(message: ConnectionMessage): ConnectionMessage {
     return {
         ...message,
         host: parsed.host,
-        port: parsed.port,
-        sslEnabled: parsed.sslEnabled,
+        port: parsed.port ?? message.port,
+        sslEnabled: parsed.sslEnabled ?? message.sslEnabled,
         user: message.user.trim() || parsed.user,
         catalog: message.catalog.trim() || parsed.catalog,
         schema: message.schema.trim() || parsed.schema
@@ -353,7 +353,13 @@ function validateConnection(value: ConnectionMessage): string | undefined {
     return undefined;
 }
 
-interface ParsedTrinoUrl extends Pick<ConnectionFormData, 'host' | 'port' | 'sslEnabled' | 'catalog' | 'schema'> {
+/**
+ * `port` and `sslEnabled` are undefined when the URL says nothing about them, so
+ * callers can keep whatever the user already chose instead of guessing over it.
+ */
+interface ParsedTrinoUrl extends Pick<ConnectionFormData, 'host' | 'catalog' | 'schema'> {
+    port?: string;
+    sslEnabled?: boolean;
     user: string;
 }
 
@@ -381,16 +387,18 @@ function parseTrinoUrl(value: string): ParsedTrinoUrl | undefined {
         }
         return undefined;
     };
-    // A JDBC URL often omits SSL even when the coordinator sits behind TLS, so
-    // fall back to the conventional TLS ports unless SSL is explicitly disabled.
+    // An http(s) URL always states the scheme. A JDBC URL may not mention SSL at
+    // all: honour SSL=… when present, otherwise infer it from a conventional TLS
+    // port, and leave it undefined when the URL simply does not say.
     const ssl = parameter('ssl');
-    const sslEnabled = isJdbc
-        ? ssl === undefined ? TLS_PORTS.has(url.port) : /^true$/i.test(ssl)
-        : url.protocol === 'https:';
+    const sslEnabled = !isJdbc ? url.protocol === 'https:'
+        : ssl !== undefined ? /^true$/i.test(ssl)
+        : TLS_PORTS.has(url.port) ? true
+        : undefined;
     const [catalog = '', schema = ''] = url.pathname.replace(/^\//, '').split('/');
     return {
         host: url.hostname,
-        port: url.port || (sslEnabled ? '443' : '8080'),
+        port: url.port || undefined,
         sslEnabled,
         catalog: decodeURIComponent(catalog),
         schema: decodeURIComponent(schema),
@@ -400,11 +408,22 @@ function parseTrinoUrl(value: string): ParsedTrinoUrl | undefined {
 
 function httpBaseUrl(value: string): string | undefined {
     const parsed = parseTrinoUrl(value);
-    return parsed && `${parsed.sslEnabled ? 'https' : 'http'}://${formatHost(parsed.host)}:${parsed.port}`;
+    if (!parsed) { return undefined; }
+    const { sslEnabled, port } = withPortDefaults(parsed);
+    return `${sslEnabled ? 'https' : 'http'}://${formatHost(parsed.host)}:${port}`;
+}
+
+/** Fills in the conventional port and scheme for a URL that omitted them. */
+function withPortDefaults(parsed: ParsedTrinoUrl): { port: string; sslEnabled: boolean } {
+    const sslEnabled = parsed.sslEnabled ?? TLS_PORTS.has(parsed.port ?? '');
+    return { sslEnabled, port: parsed.port ?? (sslEnabled ? '443' : '8080') };
 }
 
 function parseConnectionUrl(value: string): Pick<ConnectionFormData, 'host' | 'port' | 'sslEnabled'> {
-    return parseTrinoUrl(value) ?? { host: 'localhost', port: '8080', sslEnabled: false };
+    const parsed = parseTrinoUrl(value);
+    return parsed
+        ? { host: parsed.host, ...withPortDefaults(parsed) }
+        : { host: 'localhost', port: '8080', sslEnabled: false };
 }
 
 function formatHost(host: string): string {
