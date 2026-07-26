@@ -1,7 +1,7 @@
 {
   "name": "trino-explorer",
   "displayName": "Trino Explorer",
-  "publisher": "bigtechtalk",
+  "publisher": "big-tech-talk",
   "description": "Connect to Trino and browse available catalogs.",
   "version": "0.0.6",
   "license": "MIT",
@@ -70,7 +70,7 @@
         "trino.connection.url": {
           "type": "string",
           "default": "http://localhost:8080",
-          "description": "Base URL of the Trino coordinator."
+          "description": "Base URL of the Trino coordinator. Accepts http(s)://host:port or a JDBC connection string such as jdbc:trino://host:port/catalog/schema?SSL=true."
         },
         "trino.connection.user": {
           "type": "string",

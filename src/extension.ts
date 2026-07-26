@@ -46,7 +46,10 @@ class TrinoClient {
             throw new Error('Configure the Trino URL and user before connecting.');
         }
 
-        const baseUrl = rawUrl.replace(/\/$/, '');
+        const baseUrl = httpBaseUrl(rawUrl);
+        if (!baseUrl) {
+            throw new Error(`Could not read the Trino URL "${rawUrl}". Use http(s)://host:port or jdbc:trino://host:port.`);
+        }
         const password = await this.secrets.get(PASSWORD_KEY);
         const headers: Record<string, string> = {
             'X-Trino-User': user,
@@ -253,25 +256,26 @@ async function showConnectionWindow(context: vscode.ExtensionContext, provider: 
 
     panel.webview.onDidReceiveMessage(async (message: unknown) => {
         if (!isConnectionMessage(message)) { return; }
-        const validation = validateConnection(message);
+        const request = expandPastedUrl(message);
+        const validation = validateConnection(request);
         if (validation) {
             void panel.webview.postMessage({ type: 'error', message: validation });
             return;
         }
         const connection = vscode.workspace.getConfiguration('trino.connection');
-        const host = formatHost(message.host.trim());
-        const url = `${message.sslEnabled ? 'https' : 'http'}://${host}:${message.port.trim()}`;
-        await connection.update('name', message.name.trim(), vscode.ConfigurationTarget.Global);
+        const host = formatHost(request.host.trim());
+        const url = `${request.sslEnabled ? 'https' : 'http'}://${host}:${request.port.trim()}`;
+        await connection.update('name', request.name.trim(), vscode.ConfigurationTarget.Global);
         await connection.update('url', url, vscode.ConfigurationTarget.Global);
-        await connection.update('user', message.user.trim(), vscode.ConfigurationTarget.Global);
-        await connection.update('catalog', message.catalog.trim(), vscode.ConfigurationTarget.Global);
-        await connection.update('schema', message.schema.trim(), vscode.ConfigurationTarget.Global);
-        if (message.clearPassword) { await context.secrets.delete(PASSWORD_KEY); }
-        else if (message.password) { await context.secrets.store(PASSWORD_KEY, message.password); }
+        await connection.update('user', request.user.trim(), vscode.ConfigurationTarget.Global);
+        await connection.update('catalog', request.catalog.trim(), vscode.ConfigurationTarget.Global);
+        await connection.update('schema', request.schema.trim(), vscode.ConfigurationTarget.Global);
+        if (request.clearPassword) { await context.secrets.delete(PASSWORD_KEY); }
+        else if (request.password) { await context.secrets.store(PASSWORD_KEY, request.password); }
         provider.clear();
         panel.dispose();
         vscode.window.showInformationMessage(`Trino connection saved: ${url}`);
-        if (message.connect) {
+        if (request.connect) {
             try { await provider.refresh(); }
             catch (error) { showConnectionError(error); }
         }
@@ -310,20 +314,81 @@ function isConnectionMessage(value: unknown): value is ConnectionMessage {
     return typeof value === 'object' && value !== null && (value as { type?: unknown }).type === 'save';
 }
 
+/**
+ * Lets the Host field accept a whole URL — pasting jdbc:trino://host:port/catalog
+ * fills in the host, port, SSL, catalog, schema, and user instead of failing.
+ * Values already typed into those fields win over the ones in the URL.
+ */
+function expandPastedUrl(message: ConnectionMessage): ConnectionMessage {
+    const parsed = parseTrinoUrl(message.host);
+    if (!parsed) { return message; }
+    return {
+        ...message,
+        host: parsed.host,
+        port: parsed.port,
+        sslEnabled: parsed.sslEnabled,
+        user: message.user.trim() || parsed.user,
+        catalog: message.catalog.trim() || parsed.catalog,
+        schema: message.schema.trim() || parsed.schema
+    };
+}
+
 function validateConnection(value: ConnectionMessage): string | undefined {
-    if (!value.host.trim() || /:\/\//.test(value.host)) { return 'Enter a host name or IP address without http:// or https://.'; }
+    if (/:\/\//.test(value.host)) { return 'Could not read that URL. Use a host name, http(s)://host:port, or jdbc:trino://host:port.'; }
+    if (!value.host.trim()) { return 'Enter a host name, an IP address, or paste a JDBC/HTTP URL.'; }
     if (!/^\d+$/.test(value.port.trim()) || Number(value.port) < 1 || Number(value.port) > 65535) { return 'Port must be between 1 and 65535.'; }
     if (!value.user.trim()) { return 'Trino user is required.'; }
     return undefined;
 }
 
+interface ParsedTrinoUrl extends Pick<ConnectionFormData, 'host' | 'port' | 'sslEnabled' | 'catalog' | 'schema'> {
+    user: string;
+}
+
+const JDBC_SCHEME = /^jdbc:(?:trino|presto):\/\//i;
+
+/**
+ * Reads either an HTTP(S) coordinator URL or a Trino JDBC connection string.
+ * JDBC URLs look like jdbc:trino://host:port/catalog/schema?SSL=true&user=alice;
+ * the REST API this extension uses needs the equivalent http(s)://host:port.
+ */
+function parseTrinoUrl(value: string): ParsedTrinoUrl | undefined {
+    const trimmed = value.trim();
+    const isJdbc = JDBC_SCHEME.test(trimmed);
+    if (!isJdbc && !/^https?:\/\//i.test(trimmed)) { return undefined; }
+    let url: URL;
+    try { url = new URL(isJdbc ? `http://${trimmed.replace(JDBC_SCHEME, '')}` : trimmed); }
+    catch { return undefined; }
+    if (!url.hostname) { return undefined; }
+
+    // JDBC parameter names are conventionally capitalised (SSL), but match loosely.
+    const parameter = (name: string): string | undefined => {
+        for (const [key, entry] of url.searchParams) {
+            if (key.toLowerCase() === name) { return entry; }
+        }
+        return undefined;
+    };
+    const sslEnabled = isJdbc
+        ? /^true$/i.test(parameter('ssl') ?? '') || url.port === '443'
+        : url.protocol === 'https:';
+    const [catalog = '', schema = ''] = url.pathname.replace(/^\//, '').split('/');
+    return {
+        host: url.hostname,
+        port: url.port || (sslEnabled ? '443' : '8080'),
+        sslEnabled,
+        catalog: decodeURIComponent(catalog),
+        schema: decodeURIComponent(schema),
+        user: parameter('user') ?? ''
+    };
+}
+
+function httpBaseUrl(value: string): string | undefined {
+    const parsed = parseTrinoUrl(value);
+    return parsed && `${parsed.sslEnabled ? 'https' : 'http'}://${formatHost(parsed.host)}:${parsed.port}`;
+}
+
 function parseConnectionUrl(value: string): Pick<ConnectionFormData, 'host' | 'port' | 'sslEnabled'> {
-    try {
-        const url = new URL(value);
-        return { host: url.hostname, port: url.port || (url.protocol === 'https:' ? '443' : '8080'), sslEnabled: url.protocol === 'https:' };
-    } catch {
-        return { host: 'localhost', port: '8080', sslEnabled: false };
-    }
+    return parseTrinoUrl(value) ?? { host: 'localhost', port: '8080', sslEnabled: false };
 }
 
 function formatHost(host: string): string {
@@ -333,7 +398,7 @@ function formatHost(host: string): string {
 function connectionFormHtml(webview: vscode.Webview, values: ConnectionFormData): string {
     const nonce = String(Date.now());
     const escape = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
-    return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Trino Connection</title><style>body{color:var(--vscode-foreground);font-family:var(--vscode-font-family);max-width:680px;margin:32px auto;padding:0 24px}h1{font-size:1.5em}.grid{display:grid;grid-template-columns:2fr 1fr;gap:14px}label{display:block;margin:14px 0 6px;font-weight:600}input{box-sizing:border-box;width:100%;padding:7px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border)}.check{display:flex;align-items:center;gap:8px;font-weight:normal}.check input{width:auto}button{margin:22px 8px 0 0;padding:8px 14px;color:var(--vscode-button-foreground);background:var(--vscode-button-background);border:0}button.secondary{background:var(--vscode-button-secondaryBackground)}#error{min-height:20px;color:var(--vscode-errorForeground);margin-top:12px}</style></head><body><h1>Connect to Trino</h1><p>Enter the details for your Trino coordinator.</p><form id="connection"><label for="name">Connection name</label><input id="name" value="${escape(values.name)}" placeholder="Development Trino"><div class="grid"><div><label for="host">Host</label><input id="host" value="${escape(values.host)}" placeholder="trino.example.com" required></div><div><label for="port">Port</label><input id="port" type="number" min="1" max="65535" value="${escape(values.port)}" required></div></div><label class="check"><input id="sslEnabled" type="checkbox" ${values.sslEnabled ? 'checked' : ''}> Enable SSL / HTTPS</label><label for="user">User</label><input id="user" value="${escape(values.user)}" required><label for="password">Password</label><input id="password" type="password" autocomplete="new-password" placeholder="Leave blank to keep the saved password"><label class="check"><input id="clearPassword" type="checkbox"> Remove saved password</label><label for="catalog">Default catalog (optional)</label><input id="catalog" value="${escape(values.catalog)}"><label for="schema">Default schema (optional)</label><input id="schema" value="${escape(values.schema)}"><div id="error" role="alert"></div><button type="submit" data-connect="true">Save &amp; Connect</button><button type="submit" class="secondary" data-connect="false">Save</button></form><script nonce="${nonce}">const vscode=acquireVsCodeApi();let connect=true;document.querySelectorAll('button[type=submit]').forEach(b=>b.addEventListener('click',()=>connect=b.dataset.connect==='true'));document.getElementById('connection').addEventListener('submit',e=>{e.preventDefault();const byId=id=>document.getElementById(id);vscode.postMessage({type:'save',name:byId('name').value,host:byId('host').value,port:byId('port').value,sslEnabled:byId('sslEnabled').checked,user:byId('user').value,password:byId('password').value,clearPassword:byId('clearPassword').checked,catalog:byId('catalog').value,schema:byId('schema').value,connect});});window.addEventListener('message',e=>{if(e.data.type==='error')document.getElementById('error').textContent=e.data.message;});</script></body></html>`;
+    return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Trino Connection</title><style>body{color:var(--vscode-foreground);font-family:var(--vscode-font-family);max-width:680px;margin:32px auto;padding:0 24px}h1{font-size:1.5em}.grid{display:grid;grid-template-columns:2fr 1fr;gap:14px}label{display:block;margin:14px 0 6px;font-weight:600}input{box-sizing:border-box;width:100%;padding:7px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border)}.check{display:flex;align-items:center;gap:8px;font-weight:normal}.check input{width:auto}button{margin:22px 8px 0 0;padding:8px 14px;color:var(--vscode-button-foreground);background:var(--vscode-button-background);border:0}button.secondary{background:var(--vscode-button-secondaryBackground)}#error{min-height:20px;color:var(--vscode-errorForeground);margin-top:12px}</style></head><body><h1>Connect to Trino</h1><p>Enter the details for your Trino coordinator, or paste a full URL into Host &mdash; <code>http(s)://host:port</code> or <code>jdbc:trino://host:port/catalog/schema?SSL=true</code> &mdash; and the remaining fields are filled in for you.</p><form id="connection"><label for="name">Connection name</label><input id="name" value="${escape(values.name)}" placeholder="Development Trino"><div class="grid"><div><label for="host">Host</label><input id="host" value="${escape(values.host)}" placeholder="trino.example.com" required></div><div><label for="port">Port</label><input id="port" type="number" min="1" max="65535" value="${escape(values.port)}" required></div></div><label class="check"><input id="sslEnabled" type="checkbox" ${values.sslEnabled ? 'checked' : ''}> Enable SSL / HTTPS</label><label for="user">User</label><input id="user" value="${escape(values.user)}" required><label for="password">Password</label><input id="password" type="password" autocomplete="new-password" placeholder="Leave blank to keep the saved password"><label class="check"><input id="clearPassword" type="checkbox"> Remove saved password</label><label for="catalog">Default catalog (optional)</label><input id="catalog" value="${escape(values.catalog)}"><label for="schema">Default schema (optional)</label><input id="schema" value="${escape(values.schema)}"><div id="error" role="alert"></div><button type="submit" data-connect="true">Save &amp; Connect</button><button type="submit" class="secondary" data-connect="false">Save</button></form><script nonce="${nonce}">const vscode=acquireVsCodeApi();let connect=true;document.querySelectorAll('button[type=submit]').forEach(b=>b.addEventListener('click',()=>connect=b.dataset.connect==='true'));document.getElementById('connection').addEventListener('submit',e=>{e.preventDefault();const byId=id=>document.getElementById(id);vscode.postMessage({type:'save',name:byId('name').value,host:byId('host').value,port:byId('port').value,sslEnabled:byId('sslEnabled').checked,user:byId('user').value,password:byId('password').value,clearPassword:byId('clearPassword').checked,catalog:byId('catalog').value,schema:byId('schema').value,connect});});window.addEventListener('message',e=>{if(e.data.type==='error')document.getElementById('error').textContent=e.data.message;});</script></body></html>`;
 }
 
 function showConnectionError(error: unknown): void {
