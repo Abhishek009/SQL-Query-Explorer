@@ -28,6 +28,13 @@ interface TrinoQueryResult {
     rows: unknown[][];
 }
 
+interface TrinoColumn {
+    name: string;
+    type: string;
+    extra: string;
+    comment: string;
+}
+
 /**
  * Saved connections live in the `trino.connections` setting; each password is
  * kept in Secret Storage under a key derived from the connection id.
@@ -112,6 +119,18 @@ class TrinoClient {
 
     public async tables(catalog: string, schema: string): Promise<string[]> {
         return firstColumn(await this.query(`SHOW TABLES FROM ${quoteIdentifier(catalog)}.${quoteIdentifier(schema)}`));
+    }
+
+    /** SHOW COLUMNS returns one row per column: name, type, extra, comment. */
+    public async columns(catalog: string, schema: string, table: string): Promise<TrinoColumn[]> {
+        const qualified = `${quoteIdentifier(catalog)}.${quoteIdentifier(schema)}.${quoteIdentifier(table)}`;
+        const result = await this.query(`SHOW COLUMNS FROM ${qualified}`);
+        return result.rows.map(row => ({
+            name: String(row[0] ?? ''),
+            type: String(row[1] ?? ''),
+            extra: String(row[2] ?? ''),
+            comment: String(row[3] ?? '')
+        })).filter(column => column.name);
     }
 
     public async query(statement: string, token?: vscode.CancellationToken): Promise<TrinoQueryResult> {
@@ -203,7 +222,7 @@ function quoteIdentifier(identifier: string): string {
     return `"${identifier.replace(/"/g, '""')}"`;
 }
 
-type ExplorerNodeKind = 'connection' | 'catalog' | 'schema' | 'table' | 'empty';
+type ExplorerNodeKind = 'connection' | 'catalog' | 'schema' | 'table' | 'column' | 'empty';
 
 class TrinoExplorerProvider implements vscode.TreeDataProvider<ExplorerItem> {
     private readonly changed = new vscode.EventEmitter<ExplorerItem | undefined>();
@@ -240,6 +259,10 @@ class TrinoExplorerProvider implements vscode.TreeDataProvider<ExplorerItem> {
             if (element.kind === 'schema' && element.catalog && element.schema) {
                 const tables = await client.tables(element.catalog, element.schema);
                 return tables.map(table => ExplorerItem.table(connection.id, element.catalog!, element.schema!, table));
+            }
+            if (element.kind === 'table' && element.catalog && element.schema && element.table) {
+                const columns = await client.columns(element.catalog, element.schema, element.table);
+                return columns.map(column => ExplorerItem.column(connection.id, element.catalog!, element.schema!, element.table!, column));
             }
         } catch (error) {
             showConnectionError(error);
@@ -279,9 +302,10 @@ class ExplorerItem extends vscode.TreeItem {
         public readonly kind: ExplorerNodeKind,
         public readonly connectionId?: string,
         public readonly catalog?: string,
-        public readonly schema?: string
+        public readonly schema?: string,
+        public readonly table?: string
     ) {
-        super(label, kind === 'table' || kind === 'empty'
+        super(label, kind === 'column' || kind === 'empty'
             ? vscode.TreeItemCollapsibleState.None
             : vscode.TreeItemCollapsibleState.Collapsed);
         this.contextValue = `trino.${kind}`;
@@ -322,10 +346,19 @@ class ExplorerItem extends vscode.TreeItem {
     }
 
     public static table(connectionId: string, catalog: string, schema: string, table: string): ExplorerItem {
-        const item = new ExplorerItem(table, 'table', connectionId, catalog, schema);
+        const item = new ExplorerItem(table, 'table', connectionId, catalog, schema, table);
         item.description = 'TABLE';
         item.iconPath = new vscode.ThemeIcon('list-flat');
         item.tooltip = `${catalog}.${schema}.${table}`;
+        return item;
+    }
+
+    public static column(connectionId: string, catalog: string, schema: string, table: string, column: TrinoColumn): ExplorerItem {
+        const item = new ExplorerItem(column.name, 'column', connectionId, catalog, schema, table);
+        item.description = column.type;
+        item.iconPath = new vscode.ThemeIcon('symbol-field');
+        const details = [`\`${column.type}\``, column.extra, column.comment].filter(Boolean).join(' · ');
+        item.tooltip = new vscode.MarkdownString(`**${column.name}**\n\n${details}\n\n${catalog}.${schema}.${table}`);
         return item;
     }
 }
