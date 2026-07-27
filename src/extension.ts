@@ -28,6 +28,14 @@ interface TrinoQueryResult {
     rows: unknown[][];
 }
 
+/** Carries the untruncated server response alongside the short display message. */
+class TrinoRequestError extends Error {
+    public constructor(message: string, public readonly details?: string) {
+        super(message);
+        this.name = 'TrinoRequestError';
+    }
+}
+
 interface TrinoColumn {
     name: string;
     type: string;
@@ -172,7 +180,10 @@ class TrinoClient {
             columns ??= page.columns;
         }
         if (page.error) {
-            throw new Error(page.error.message || page.error.errorName || 'Trino returned an error.');
+            throw new TrinoRequestError(
+                page.error.message || page.error.errorName || 'Trino returned an error.',
+                JSON.stringify(page.error, null, 2)
+            );
         }
         return { ...page, columns, data: rows };
     }
@@ -194,9 +205,9 @@ class TrinoClient {
         if (!response.ok) {
             const details = await response.text();
             if (/plain HTTP request was sent to HTTPS port/i.test(details)) {
-                throw new Error('The coordinator expects HTTPS on this port. Turn on "Enable SSL / HTTPS" in the connection window, or add ?SSL=true to the JDBC URL.');
+                throw new TrinoRequestError('The coordinator expects HTTPS on this port. Turn on "Enable SSL / HTTPS" in the connection window, or add ?SSL=true to the JDBC URL.', details);
             }
-            throw new Error(`Trino request failed (${response.status}): ${summarize(details) || response.statusText}`);
+            throw new TrinoRequestError(`Trino request failed (${response.status}): ${summarize(details) || response.statusText}`, details);
         }
         return response.json() as Promise<TrinoPage>;
     }
@@ -567,16 +578,16 @@ async function previewTable(store: ConnectionStore, secrets: vscode.SecretStorag
     if (!force && !isDoubleClick(`${connection.id}/${item.catalog}/${item.schema}/${item.table}`)) { return; }
     const qualified = `${quoteIdentifier(item.catalog)}.${quoteIdentifier(item.schema)}.${quoteIdentifier(item.table)}`;
     const limit = previewRowLimit();
+    const sql = `SELECT * FROM ${qualified} LIMIT ${limit}`;
     try {
         const result = await vscode.window.withProgress(
             { location: vscode.ProgressLocation.Window, title: `Loading ${item.table}…`, cancellable: true },
-            (_, token) => new TrinoClient(secrets, connection).query(`SELECT * FROM ${qualified} LIMIT ${limit}`, token)
+            (_, token) => new TrinoClient(secrets, connection).query(sql, token)
         );
         const shown = `${result.rows.length.toLocaleString()} row(s) from ${item.catalog}.${item.schema}.${item.table}`;
         showSqlResults(result, connection, `${item.table} — ${connection.name}`, `${shown} (limit ${limit.toLocaleString()}).`);
     } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        vscode.window.showErrorMessage(`Could not preview ${item.table}: ${message}`);
+        showQueryError(error, connection, sql, `${item.table} — failed`);
     }
 }
 
@@ -619,7 +630,7 @@ async function runActiveSql(store: ConnectionStore, secrets: vscode.SecretStorag
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         status.record(editor.document.uri, { line, milliseconds: Date.now() - started, rows: 0, error: summarize(message) });
-        vscode.window.showErrorMessage(`Trino query failed: ${message}`);
+        showQueryError(error, connection, sql);
     }
 }
 
@@ -698,6 +709,27 @@ async function showConnectionWindow(
             }
         }
     }, undefined, context.subscriptions);
+}
+
+/** Failures land in the same panel as results, with the full server response. */
+function showQueryError(error: unknown, connection: StoredConnection, sql: string, title?: string): void {
+    const panel = vscode.window.createWebviewPanel(
+        'trinoQueryResults',
+        title ?? `Trino Error — ${connection.name}`,
+        { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
+        { enableScripts: false }
+    );
+    const message = error instanceof Error ? error.message : String(error);
+    const details = error instanceof TrinoRequestError ? error.details : undefined;
+    panel.webview.html = queryErrorHtml(panel.webview, connection, sql, message, details);
+}
+
+function queryErrorHtml(webview: vscode.Webview, connection: StoredConnection, sql: string, message: string, details?: string): string {
+    const escape = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const detailBlock = details && details.trim() && details.trim() !== message.trim()
+        ? `<h2>Server response</h2><pre class="details">${escape(details)}</pre>`
+        : '';
+    return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline';"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>body{color:var(--vscode-foreground);font-family:var(--vscode-font-family);margin:0;padding:18px}h1{font-size:1.25em;margin:0 0 6px;color:var(--vscode-errorForeground)}h2{font-size:.95em;margin:20px 0 6px;color:var(--vscode-descriptionForeground);text-transform:uppercase;letter-spacing:.04em}.note{margin:0 0 14px;color:var(--vscode-descriptionForeground)}pre{font-family:var(--vscode-editor-font-family,monospace);font-size:var(--vscode-editor-font-size,13px);white-space:pre-wrap;word-break:break-word;padding:12px;border:1px solid var(--vscode-panel-border,rgba(128,128,128,.35));border-radius:3px;background:var(--vscode-textCodeBlock-background,rgba(128,128,128,.1));margin:0}pre.message{border-left:3px solid var(--vscode-errorForeground)}</style></head><body><h1>Query failed</h1><p class="note">${escape(connection.name)} — ${escape(connection.url)}</p><pre class="message">${escape(message)}</pre>${detailBlock}<h2>Statement</h2><pre>${escape(sql)}</pre></body></html>`;
 }
 
 function sqlResultsHtml(webview: vscode.Webview, result: TrinoQueryResult, connection: StoredConnection, subtitle?: string): string {
