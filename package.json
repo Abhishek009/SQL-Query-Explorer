@@ -27,17 +27,33 @@
     "query",
     "presto"
   ],
-  "activationEvents": [
-    "onView:trinoCatalogs",
-    "onCommand:trino.connect",
-    "onCommand:trino.configureConnection"
-  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
       {
+        "command": "trino.addConnection",
+        "title": "Trino: Add Connection",
+        "icon": "$(add)"
+      },
+      {
+        "command": "trino.editConnection",
+        "title": "Trino: Edit Connection",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "trino.removeConnection",
+        "title": "Trino: Remove Connection",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "trino.setActiveConnection",
+        "title": "Trino: Use Connection for Queries",
+        "icon": "$(check)"
+      },
+      {
         "command": "trino.connect",
-        "title": "Trino: Connect"
+        "title": "Trino: Connect",
+        "icon": "$(debug-disconnect)"
       },
       {
         "command": "trino.configureConnection",
@@ -62,30 +78,70 @@
     "configuration": {
       "title": "Trino Explorer",
       "properties": {
+        "trino.connections": {
+          "type": "array",
+          "default": [],
+          "description": "Saved Trino connections. Managed by the Connections view — passwords are kept in Secret Storage, not here.",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "name",
+              "url",
+              "user"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Stable identifier for the connection."
+              },
+              "name": {
+                "type": "string",
+                "description": "Display name shown in the Connections view."
+              },
+              "url": {
+                "type": "string",
+                "description": "Coordinator URL, for example https://trino.example.com:443."
+              },
+              "user": {
+                "type": "string",
+                "description": "User sent in the X-Trino-User header."
+              },
+              "catalog": {
+                "type": "string",
+                "description": "Optional default catalog for the session."
+              },
+              "schema": {
+                "type": "string",
+                "description": "Optional default schema for the session."
+              }
+            }
+          }
+        },
         "trino.connection.name": {
           "type": "string",
           "default": "Trino Connection",
-          "description": "Display name for this Trino connection in the Explorer."
+          "markdownDeprecationMessage": "Superseded by `#trino.connections#`. Existing values are migrated automatically."
         },
         "trino.connection.url": {
           "type": "string",
           "default": "http://localhost:8080",
-          "description": "Base URL of the Trino coordinator. Accepts http(s)://host:port or a JDBC connection string such as jdbc:trino://host:port/catalog/schema?SSL=true."
+          "markdownDeprecationMessage": "Superseded by `#trino.connections#`. Existing values are migrated automatically."
         },
         "trino.connection.user": {
           "type": "string",
           "default": "",
-          "description": "Trino user sent in the X-Trino-User header."
+          "markdownDeprecationMessage": "Superseded by `#trino.connections#`. Existing values are migrated automatically."
         },
         "trino.connection.catalog": {
           "type": "string",
           "default": "",
-          "description": "Optional catalog used for the session."
+          "markdownDeprecationMessage": "Superseded by `#trino.connections#`. Existing values are migrated automatically."
         },
         "trino.connection.schema": {
           "type": "string",
           "default": "",
-          "description": "Optional schema used for the session."
+          "markdownDeprecationMessage": "Superseded by `#trino.connections#`. Existing values are migrated automatically."
         }
       }
     },
@@ -102,26 +158,70 @@
       "trino": [
         {
           "id": "trinoCatalogs",
-          "name": "Catalogs"
+          "name": "Connections"
         }
       ]
     },
+    "viewsWelcome": [
+      {
+        "view": "trinoCatalogs",
+        "contents": "No Trino connections yet.\n[Add Connection](command:trino.addConnection)"
+      }
+    ],
     "menus": {
+      "commandPalette": [
+        {
+          "command": "trino.setActiveConnection",
+          "when": "false"
+        }
+      ],
       "view/title": [
         {
-          "command": "trino.refreshCatalogs",
+          "command": "trino.addConnection",
           "when": "view == trinoCatalogs",
-          "group": "navigation"
+          "group": "navigation@1"
         },
         {
           "command": "trino.openQuery",
           "when": "view == trinoCatalogs",
-          "group": "navigation"
+          "group": "navigation@2"
         },
         {
-          "command": "trino.configureConnection",
+          "command": "trino.refreshCatalogs",
           "when": "view == trinoCatalogs",
-          "group": "navigation"
+          "group": "navigation@3"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "trino.refreshCatalogs",
+          "when": "view == trinoCatalogs && viewItem =~ /^trino\\.connection/",
+          "group": "inline@1"
+        },
+        {
+          "command": "trino.editConnection",
+          "when": "view == trinoCatalogs && viewItem =~ /^trino\\.connection/",
+          "group": "inline@2"
+        },
+        {
+          "command": "trino.setActiveConnection",
+          "when": "view == trinoCatalogs && viewItem == trino.connection",
+          "group": "1_connection@1"
+        },
+        {
+          "command": "trino.connect",
+          "when": "view == trinoCatalogs && viewItem =~ /^trino\\.connection/",
+          "group": "1_connection@2"
+        },
+        {
+          "command": "trino.editConnection",
+          "when": "view == trinoCatalogs && viewItem =~ /^trino\\.connection/",
+          "group": "2_manage@1"
+        },
+        {
+          "command": "trino.removeConnection",
+          "when": "view == trinoCatalogs && viewItem =~ /^trino\\.connection/",
+          "group": "2_manage@2"
         }
       ],
       "editor/title": [
