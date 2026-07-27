@@ -168,6 +168,13 @@
           "title": "Trino",
           "icon": "resources/trino.svg"
         }
+      ],
+      "panel": [
+        {
+          "id": "trinoResults",
+          "title": "Trino Results",
+          "icon": "resources/trino.svg"
+        }
       ]
     },
     "views": {
@@ -175,6 +182,13 @@
         {
           "id": "trinoCatalogs",
           "name": "Connections"
+        }
+      ],
+      "trinoResults": [
+        {
+          "id": "trinoResultsView",
+          "name": "Results",
+          "type": "webview"
         }
       ]
     },

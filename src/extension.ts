@@ -233,6 +233,35 @@ function quoteIdentifier(identifier: string): string {
     return `"${identifier.replace(/"/g, '""')}"`;
 }
 
+/**
+ * Renders query output in the bottom panel beside Terminal and Output rather
+ * than in an editor tab. The view is created lazily, so the first result has to
+ * reveal it before its webview exists.
+ */
+class ResultsViewProvider implements vscode.WebviewViewProvider {
+    public static readonly viewId = 'trinoResultsView';
+    private view: vscode.WebviewView | undefined;
+    private render: ((webview: vscode.Webview) => string) | undefined;
+
+    public resolveWebviewView(view: vscode.WebviewView): void {
+        this.view = view;
+        view.webview.options = { enableScripts: false };
+        if (this.render) { view.webview.html = this.render(view.webview); }
+        view.onDidDispose(() => { this.view = undefined; });
+    }
+
+    public async show(render: (webview: vscode.Webview) => string): Promise<void> {
+        this.render = render;
+        if (!this.view) {
+            // Focusing the view forces VS Code to construct it, which resolves it above.
+            await vscode.commands.executeCommand(`${ResultsViewProvider.viewId}.focus`, { preserveFocus: true });
+        }
+        if (!this.view) { return; }
+        this.view.webview.html = render(this.view.webview);
+        this.view.show(true);
+    }
+}
+
 interface QueryOutcome {
     line: number;
     milliseconds: number;
@@ -462,11 +491,15 @@ export function activate(context: vscode.ExtensionContext): void {
     const store = new ConnectionStore(context);
     const provider = new TrinoExplorerProvider(store, context.secrets);
     const status = new QueryStatusProvider(context);
+    const results = new ResultsViewProvider();
     void store.migrateLegacyConnection();
 
     context.subscriptions.push(
         status,
         vscode.window.registerTreeDataProvider('trinoCatalogs', provider),
+        vscode.window.registerWebviewViewProvider(ResultsViewProvider.viewId, results, {
+            webviewOptions: { retainContextWhenHidden: true }
+        }),
         vscode.languages.registerCodeLensProvider({ language: 'sql' }, status),
         vscode.workspace.onDidCloseTextDocument(document => status.forget(document.uri)),
         // Reapply after a split, tab switch, or reopen; decorations are per editor.
@@ -524,13 +557,13 @@ export function activate(context: vscode.ExtensionContext): void {
         await showConnectionWindow(context, store, provider, connection);
     });
     register('trino.previewTable', async (item?: ExplorerItem) => {
-        await previewTable(store, context.secrets, item, true);
+        await previewTable(store, context.secrets, results, item, true);
     });
     register('trino.tableClicked', async (item?: ExplorerItem) => {
-        await previewTable(store, context.secrets, item);
+        await previewTable(store, context.secrets, results, item);
     });
     register('trino.openQuery', async () => { await openSqlQueryEditor(store); });
-    register('trino.runActiveSql', async () => { await runActiveSql(store, context.secrets, status); });
+    register('trino.runActiveSql', async () => { await runActiveSql(store, context.secrets, status, results); });
 }
 
 async function pickConnection(store: ConnectionStore, placeHolder: string): Promise<StoredConnection | undefined> {
@@ -572,7 +605,7 @@ function isDoubleClick(key: string): boolean {
 }
 
 /** Runs a bounded SELECT for the clicked table and shows it in the results grid. */
-async function previewTable(store: ConnectionStore, secrets: vscode.SecretStorage, item?: ExplorerItem, force = false): Promise<void> {
+async function previewTable(store: ConnectionStore, secrets: vscode.SecretStorage, results: ResultsViewProvider, item?: ExplorerItem, force = false): Promise<void> {
     const connection = store.get(item?.connectionId);
     if (!connection || !item?.catalog || !item.schema || !item.table) { return; }
     if (!force && !isDoubleClick(`${connection.id}/${item.catalog}/${item.schema}/${item.table}`)) { return; }
@@ -585,9 +618,9 @@ async function previewTable(store: ConnectionStore, secrets: vscode.SecretStorag
             (_, token) => new TrinoClient(secrets, connection).query(sql, token)
         );
         const shown = `${result.rows.length.toLocaleString()} row(s) from ${item.catalog}.${item.schema}.${item.table}`;
-        showSqlResults(result, connection, `${item.table} — ${connection.name}`, `${shown} (limit ${limit.toLocaleString()}).`);
+        await showSqlResults(results, result, connection, `${shown} (limit ${limit.toLocaleString()}).`);
     } catch (error) {
-        showQueryError(error, connection, sql, `${item.table} — failed`);
+        await showQueryError(results, error, connection, sql);
     }
 }
 
@@ -606,7 +639,7 @@ async function openSqlQueryEditor(store: ConnectionStore): Promise<void> {
     await vscode.window.showTextDocument(document, { preview: false });
 }
 
-async function runActiveSql(store: ConnectionStore, secrets: vscode.SecretStorage, status: QueryStatusProvider): Promise<void> {
+async function runActiveSql(store: ConnectionStore, secrets: vscode.SecretStorage, status: QueryStatusProvider, results: ResultsViewProvider): Promise<void> {
     const editor = vscode.window.activeTextEditor;
     if (!editor || editor.document.languageId !== 'sql') {
         vscode.window.showErrorMessage('Open a Trino SQL query editor before running a query.');
@@ -626,11 +659,11 @@ async function runActiveSql(store: ConnectionStore, secrets: vscode.SecretStorag
             (_, token) => new TrinoClient(secrets, connection).query(sql, token)
         );
         status.record(editor.document.uri, { line, milliseconds: Date.now() - started, rows: result.rows.length });
-        showSqlResults(result, connection);
+        await showSqlResults(results, result, connection);
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         status.record(editor.document.uri, { line, milliseconds: Date.now() - started, rows: 0, error: summarize(message) });
-        showQueryError(error, connection, sql);
+        await showQueryError(results, error, connection, sql);
     }
 }
 
@@ -642,15 +675,8 @@ function firstStatementLine(document: vscode.TextDocument): number {
     return 0;
 }
 
-function showSqlResults(result: TrinoQueryResult, connection: StoredConnection, title?: string, subtitle?: string): void {
-    const panel = vscode.window.createWebviewPanel(
-        'trinoQueryResults',
-        title ?? `Trino Results — ${connection.name}`,
-        // Keep the caret in the SQL editor so its timing CodeLens redraws at once.
-        { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
-        { enableScripts: false }
-    );
-    panel.webview.html = sqlResultsHtml(panel.webview, result, connection, subtitle);
+async function showSqlResults(results: ResultsViewProvider, result: TrinoQueryResult, connection: StoredConnection, subtitle?: string): Promise<void> {
+    await results.show(webview => sqlResultsHtml(webview, result, connection, subtitle));
 }
 
 async function showConnectionWindow(
@@ -712,16 +738,10 @@ async function showConnectionWindow(
 }
 
 /** Failures land in the same panel as results, with the full server response. */
-function showQueryError(error: unknown, connection: StoredConnection, sql: string, title?: string): void {
-    const panel = vscode.window.createWebviewPanel(
-        'trinoQueryResults',
-        title ?? `Trino Error — ${connection.name}`,
-        { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
-        { enableScripts: false }
-    );
+async function showQueryError(results: ResultsViewProvider, error: unknown, connection: StoredConnection, sql: string): Promise<void> {
     const message = error instanceof Error ? error.message : String(error);
     const details = error instanceof TrinoRequestError ? error.details : undefined;
-    panel.webview.html = queryErrorHtml(panel.webview, connection, sql, message, details);
+    await results.show(webview => queryErrorHtml(webview, connection, sql, message, details));
 }
 
 function queryErrorHtml(webview: vscode.Webview, connection: StoredConnection, sql: string, message: string, details?: string): string {
@@ -729,7 +749,7 @@ function queryErrorHtml(webview: vscode.Webview, connection: StoredConnection, s
     const detailBlock = details && details.trim() && details.trim() !== message.trim()
         ? `<h2>Server response</h2><pre class="details">${escape(details)}</pre>`
         : '';
-    return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline';"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>body{color:var(--vscode-foreground);font-family:var(--vscode-font-family);margin:0;padding:18px}h1{font-size:1.25em;margin:0 0 6px;color:var(--vscode-errorForeground)}h2{font-size:.95em;margin:20px 0 6px;color:var(--vscode-descriptionForeground);text-transform:uppercase;letter-spacing:.04em}.note{margin:0 0 14px;color:var(--vscode-descriptionForeground)}pre{font-family:var(--vscode-editor-font-family,monospace);font-size:var(--vscode-editor-font-size,13px);white-space:pre-wrap;word-break:break-word;padding:12px;border:1px solid var(--vscode-panel-border,rgba(128,128,128,.35));border-radius:3px;background:var(--vscode-textCodeBlock-background,rgba(128,128,128,.1));margin:0}pre.message{border-left:3px solid var(--vscode-errorForeground)}</style></head><body><h1>Query failed</h1><p class="note">${escape(connection.name)} — ${escape(connection.url)}</p><pre class="message">${escape(message)}</pre>${detailBlock}<h2>Statement</h2><pre>${escape(sql)}</pre></body></html>`;
+    return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline';"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>body{color:var(--vscode-foreground);font-family:var(--vscode-font-family);margin:0;padding:10px 14px;height:100%;box-sizing:border-box;overflow:auto}h1{font-size:1.05em;margin:0 0 4px;color:var(--vscode-errorForeground)}h2{font-size:.95em;margin:20px 0 6px;color:var(--vscode-descriptionForeground);text-transform:uppercase;letter-spacing:.04em}.note{margin:0 0 14px;color:var(--vscode-descriptionForeground)}pre{font-family:var(--vscode-editor-font-family,monospace);font-size:var(--vscode-editor-font-size,13px);white-space:pre-wrap;word-break:break-word;padding:12px;border:1px solid var(--vscode-panel-border,rgba(128,128,128,.35));border-radius:3px;background:var(--vscode-textCodeBlock-background,rgba(128,128,128,.1));margin:0}pre.message{border-left:3px solid var(--vscode-errorForeground)}</style></head><body><h1>Query failed</h1><p class="note">${escape(connection.name)} — ${escape(connection.url)}</p><pre class="message">${escape(message)}</pre>${detailBlock}<h2>Statement</h2><pre>${escape(sql)}</pre></body></html>`;
 }
 
 function sqlResultsHtml(webview: vscode.Webview, result: TrinoQueryResult, connection: StoredConnection, subtitle?: string): string {
@@ -742,7 +762,7 @@ function sqlResultsHtml(webview: vscode.Webview, result: TrinoQueryResult, conne
         ? `Showing the first ${displayedRows.length.toLocaleString()} of ${result.rows.length.toLocaleString()} rows.`
         : `${result.rows.length.toLocaleString()} row(s) returned.`);
     const table = result.columns.length ? `<div class="results"><table><thead><tr>${headers}</tr></thead><tbody>${rows}</tbody></table></div>` : '<p>Statement completed. No rows returned.</p>';
-    return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline';"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>body{color:var(--vscode-foreground);font-family:var(--vscode-font-family);margin:0;padding:18px;overflow:hidden}h1{font-size:1.25em;margin:0 0 6px}.note{margin:0 0 14px;color:var(--vscode-descriptionForeground)}.results{height:calc(100vh - 108px);overflow:auto;border:1px solid var(--vscode-panel-border)}table{border-collapse:collapse;width:max-content;min-width:100%}th,td{padding:6px 10px;border-right:1px solid var(--vscode-panel-border);border-bottom:1px solid var(--vscode-panel-border);text-align:left;vertical-align:top;white-space:pre-wrap}th{position:sticky;top:0;background:var(--vscode-editor-background);font-weight:600}td{max-width:420px}</style></head><body><h1>Trino Query Results</h1><p class="note">${escape(connection.name)} — ${note}</p>${table}</body></html>`;
+    return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline';"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>html,body{height:100%}body{display:flex;flex-direction:column;color:var(--vscode-foreground);font-family:var(--vscode-font-family);margin:0;padding:10px 14px;box-sizing:border-box;overflow:hidden}.note{flex:0 0 auto;margin:0 0 8px;color:var(--vscode-descriptionForeground);font-size:.9em}.results{flex:1 1 auto;min-height:0;overflow:auto;border:1px solid var(--vscode-panel-border,rgba(128,128,128,.35))}table{border-collapse:collapse;width:max-content;min-width:100%}th,td{padding:6px 10px;border-right:1px solid var(--vscode-panel-border);border-bottom:1px solid var(--vscode-panel-border);text-align:left;vertical-align:top;white-space:pre-wrap}th{position:sticky;top:0;background:var(--vscode-editor-background);font-weight:600}td{max-width:420px}</style></head><body><p class="note">${escape(connection.name)} — ${note}</p>${table}</body></html>`;
 }
 
 interface ConnectionFormData {
