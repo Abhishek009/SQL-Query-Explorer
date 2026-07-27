@@ -233,27 +233,62 @@ interface QueryOutcome {
  * Reports the last run's timing above the statement it belongs to. A CodeLens is
  * the only supported way to draw a line of text above editor content.
  */
-class QueryStatusProvider implements vscode.CodeLensProvider {
+class QueryStatusProvider implements vscode.CodeLensProvider, vscode.Disposable {
     private readonly changed = new vscode.EventEmitter<void>();
     public readonly onDidChangeCodeLenses = this.changed.event;
     private readonly outcomes = new Map<string, QueryOutcome>();
+    private readonly successGutter: vscode.TextEditorDecorationType;
+    private readonly errorGutter: vscode.TextEditorDecorationType;
+
+    public constructor(context: vscode.ExtensionContext) {
+        const gutter = (file: string, overviewColor: string) => vscode.window.createTextEditorDecorationType({
+            gutterIconPath: vscode.Uri.file(context.asAbsolutePath(`resources/${file}`)),
+            gutterIconSize: 'contain',
+            overviewRulerColor: overviewColor,
+            overviewRulerLane: vscode.OverviewRulerLane.Left
+        });
+        this.successGutter = gutter('query-success.svg', '#2ea043');
+        this.errorGutter = gutter('query-error.svg', '#f14c4c');
+    }
 
     public record(uri: vscode.Uri, outcome: QueryOutcome): void {
         this.outcomes.set(uri.toString(), outcome);
         this.changed.fire();
+        this.decorate();
         // Opening the results panel can leave the editor inactive, which defers the
         // redraw; a second notification once that settles keeps the lens immediate.
-        setTimeout(() => this.changed.fire(), 0);
+        setTimeout(() => { this.changed.fire(); this.decorate(); }, 0);
     }
 
     public forget(uri: vscode.Uri): void {
-        if (this.outcomes.delete(uri.toString())) { this.changed.fire(); }
+        if (this.outcomes.delete(uri.toString())) { this.changed.fire(); this.decorate(); }
+    }
+
+    /** Puts the tick or cross in the gutter of every editor showing the statement. */
+    public decorate(): void {
+        for (const editor of vscode.window.visibleTextEditors) {
+            const outcome = this.outcomes.get(editor.document.uri.toString());
+            const ranges = outcome
+                ? [new vscode.Range(this.anchor(outcome, editor.document), 0, this.anchor(outcome, editor.document), 0)]
+                : [];
+            editor.setDecorations(this.successGutter, outcome && !outcome.error ? ranges : []);
+            editor.setDecorations(this.errorGutter, outcome?.error ? ranges : []);
+        }
+    }
+
+    public dispose(): void {
+        this.successGutter.dispose();
+        this.errorGutter.dispose();
+    }
+
+    private anchor(outcome: QueryOutcome, document: vscode.TextDocument): number {
+        return Math.min(outcome.line, Math.max(document.lineCount - 1, 0));
     }
 
     public provideCodeLenses(document: vscode.TextDocument): vscode.CodeLens[] {
         const outcome = this.outcomes.get(document.uri.toString());
         if (!outcome) { return []; }
-        const line = Math.min(outcome.line, Math.max(document.lineCount - 1, 0));
+        const line = this.anchor(outcome, document);
         const elapsed = formatDuration(outcome.milliseconds);
         const title = outcome.error
             ? `$(error) Failed in ${elapsed} — ${outcome.error}`
@@ -415,13 +450,16 @@ class ExplorerItem extends vscode.TreeItem {
 export function activate(context: vscode.ExtensionContext): void {
     const store = new ConnectionStore(context);
     const provider = new TrinoExplorerProvider(store, context.secrets);
-    const status = new QueryStatusProvider();
+    const status = new QueryStatusProvider(context);
     void store.migrateLegacyConnection();
 
     context.subscriptions.push(
+        status,
         vscode.window.registerTreeDataProvider('trinoCatalogs', provider),
         vscode.languages.registerCodeLensProvider({ language: 'sql' }, status),
         vscode.workspace.onDidCloseTextDocument(document => status.forget(document.uri)),
+        // Reapply after a split, tab switch, or reopen; decorations are per editor.
+        vscode.window.onDidChangeVisibleTextEditors(() => status.decorate()),
         store.onDidChange(() => provider.refresh()),
         vscode.workspace.onDidChangeConfiguration(event => {
             if (event.affectsConfiguration('trino.connections')) { provider.refresh(); }
