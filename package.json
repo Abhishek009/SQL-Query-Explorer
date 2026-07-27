@@ -27,6 +27,9 @@
     "query",
     "presto"
   ],
+  "activationEvents": [
+    "onLanguage:sql"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [

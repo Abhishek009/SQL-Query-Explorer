@@ -376,6 +376,124 @@ function toDelimitedText(columns: string[], rows: unknown[][], format: 'csv' | '
     return `${lines.join('\r\n')}\r\n`;
 }
 
+/**
+ * Completes catalog, schema, table, and column names from the active connection.
+ * Metadata queries are cached briefly so typing does not hammer the coordinator.
+ */
+class SqlCompletionProvider implements vscode.CompletionItemProvider {
+    private static readonly CACHE_MS = 5 * 60 * 1_000;
+    private readonly cache = new Map<string, { at: number; names: string[] }>();
+
+    public constructor(private readonly store: ConnectionStore, private readonly secrets: vscode.SecretStorage) {}
+
+    public clear(): void { this.cache.clear(); }
+
+    public async provideCompletionItems(
+        document: vscode.TextDocument,
+        position: vscode.Position
+    ): Promise<vscode.CompletionItem[]> {
+        const connection = this.store.get(this.store.activeId);
+        if (!connection) { return []; }
+        const prefix = document.getText(new vscode.Range(position.line, 0, position.line, position.character));
+        const qualifier = qualifierParts(prefix);
+        const client = new TrinoClient(this.secrets, connection);
+
+        try {
+            if (qualifier.length === 0) {
+                const catalogs = await this.lookup(`${connection.id}:catalogs`, () => client.catalogs());
+                const items = catalogs.map(name => completionItem(name, vscode.CompletionItemKind.Module, 'catalog'));
+                if (connection.catalog) {
+                    const schemas = await this.lookup(`${connection.id}:${connection.catalog}`, () => client.schemas(connection.catalog!));
+                    items.push(...schemas.map(name => completionItem(name, vscode.CompletionItemKind.Folder, `schema in ${connection.catalog}`)));
+                }
+                return items;
+            }
+            if (qualifier.length === 1) {
+                const [first] = qualifier;
+                const schemas = await this.lookup(`${connection.id}:${first}`, () => client.schemas(first));
+                if (schemas.length) {
+                    return schemas.map(name => completionItem(name, vscode.CompletionItemKind.Folder, `schema in ${first}`));
+                }
+                // Not a catalog — treat it as a schema inside the connection's default catalog.
+                if (connection.catalog) {
+                    const tables = await this.lookup(`${connection.id}:${connection.catalog}.${first}`, () => client.tables(connection.catalog!, first));
+                    return tables.map(name => completionItem(name, vscode.CompletionItemKind.Struct, `table in ${first}`));
+                }
+                return [];
+            }
+            if (qualifier.length === 2) {
+                const [catalog, schema] = qualifier;
+                const tables = await this.lookup(`${connection.id}:${catalog}.${schema}`, () => client.tables(catalog, schema));
+                return tables.map(name => completionItem(name, vscode.CompletionItemKind.Struct, `table in ${catalog}.${schema}`));
+            }
+            const [catalog, schema, table] = qualifier;
+            const columns = await this.lookup(
+                `${connection.id}:${catalog}.${schema}.${table}:columns`,
+                async () => (await client.columns(catalog, schema, table)).map(column => `${column.name} ${column.type}`)
+            );
+            return columns.map(entry => {
+                const [name, type] = entry.split(' ');
+                return completionItem(name, vscode.CompletionItemKind.Field, type || 'column');
+            });
+        } catch {
+            // Metadata is best effort; a failed lookup must not break typing.
+            return [];
+        }
+    }
+
+    private async lookup(key: string, load: () => Promise<string[]>): Promise<string[]> {
+        const cached = this.cache.get(key);
+        if (cached && Date.now() - cached.at < SqlCompletionProvider.CACHE_MS) { return cached.names; }
+        const names = await load();
+        this.cache.set(key, { at: Date.now(), names });
+        return names;
+    }
+}
+
+/**
+ * Returns the dotted qualifier immediately before the cursor, excluding the
+ * partial word being typed: "from tpch.sf1.cus" yields ["tpch", "sf1"].
+ */
+function qualifierParts(linePrefix: string): string[] {
+    const segments: string[] = [];
+    let index = linePrefix.length;
+    for (;;) {
+        let start: number;
+        if (index > 0 && linePrefix[index - 1] === '"') {
+            // Quoted identifiers may contain dots and spaces, so scan to the opening quote.
+            let cursor = index - 2;
+            while (cursor >= 0) {
+                if (linePrefix[cursor] === '"') {
+                    if (cursor > 0 && linePrefix[cursor - 1] === '"') { cursor -= 2; continue; }
+                    break;
+                }
+                cursor--;
+            }
+            if (cursor < 0) { break; }
+            segments.unshift(linePrefix.slice(cursor + 1, index - 1).replace(/""/g, '"'));
+            start = cursor;
+        } else {
+            let cursor = index;
+            while (cursor > 0 && /[A-Za-z0-9_$]/.test(linePrefix[cursor - 1])) { cursor--; }
+            segments.unshift(linePrefix.slice(cursor, index));
+            start = cursor;
+        }
+        if (start > 0 && linePrefix[start - 1] === '.') { index = start - 1; continue; }
+        break;
+    }
+    // The final segment is the partial word being typed, not part of the qualifier.
+    segments.pop();
+    return segments.filter(segment => segment.length > 0);
+}
+
+function completionItem(name: string, kind: vscode.CompletionItemKind, detail: string): vscode.CompletionItem {
+    const item = new vscode.CompletionItem(name, kind);
+    item.detail = detail;
+    // Quote identifiers that would otherwise be invalid bare words.
+    item.insertText = /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? name : `"${name.replace(/"/g, '""')}"`;
+    return item;
+}
+
 interface QueryOutcome {
     line: number;
     milliseconds: number;
@@ -606,10 +724,13 @@ export function activate(context: vscode.ExtensionContext): void {
     const provider = new TrinoExplorerProvider(store, context.secrets);
     const status = new QueryStatusProvider(context);
     const results = new ResultsViewProvider();
+    const completions = new SqlCompletionProvider(store, context.secrets);
     void store.migrateLegacyConnection();
 
     context.subscriptions.push(
         status,
+        vscode.languages.registerCompletionItemProvider({ language: 'sql' }, completions, '.'),
+        store.onDidChange(() => completions.clear()),
         vscode.window.registerTreeDataProvider('trinoCatalogs', provider),
         vscode.window.registerWebviewViewProvider(ResultsViewProvider.viewId, results, {
             webviewOptions: { retainContextWhenHidden: true }
@@ -661,6 +782,7 @@ export function activate(context: vscode.ExtensionContext): void {
     });
     register('trino.refreshCatalogs', async (item?: ExplorerItem) => {
         provider.forget(item?.connectionId);
+        completions.clear();
         const connection = store.get(item?.connectionId);
         if (!connection) { return; }
         try { await provider.connect(connection); }
@@ -887,8 +1009,18 @@ function sqlResultsHtml(webview: vscode.Webview, state: ResultsState): string {
     const nonce = String(Date.now());
     const escape = (value: unknown) => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     const format = (value: unknown) => value === null ? 'NULL' : typeof value === 'object' ? JSON.stringify(value) : String(value);
-    const headers = result.columns.map(column => `<th>${escape(column)}</th>`).join('');
-    const rows = displayedRows.map(row => `<tr>${result.columns.map((_, index) => `<td>${escape(format(row[index]))}</td>`).join('')}</tr>`).join('');
+    const isNumeric = (value: unknown) => typeof value === 'number'
+        || (typeof value === 'string' && value.trim() !== '' && /^-?\d+(\.\d+)?$/.test(value.trim()));
+    const cell = (value: unknown) => {
+        const text = format(value);
+        const classes = value === null || value === undefined ? 'nul' : isNumeric(value) ? 'num' : '';
+        const title = text.length > 60 ? ` title="${escape(text)}"` : '';
+        return `<td class="${classes}"${title}>${escape(text)}</td>`;
+    };
+    const headers = `<th class="rownum"></th>${result.columns.map(column => `<th>${escape(column)}</th>`).join('')}`;
+    const rows = displayedRows
+        .map((row, index) => `<tr><th class="rownum">${index + 1}</th>${result.columns.map((_, column) => cell(row[column])).join('')}</tr>`)
+        .join('');
     const fetched = result.rows.length;
     const note = state.subtitle ?? (fetched > displayedRows.length
         ? `${displayedRows.length.toLocaleString()} of ${fetched.toLocaleString()} rows`
@@ -897,7 +1029,18 @@ function sqlResultsHtml(webview: vscode.Webview, state: ResultsState): string {
         ? `<div class="results"><table><thead><tr>${headers}</tr></thead><tbody>${rows}</tbody></table></div>`
         : '<p>Statement completed. No rows returned.</p>';
     const toolbar = `<div class="bar"><span class="note">${escape(connection.name)} — ${note}</span><span class="spacer"></span><label for="limit">Limit</label><input id="limit" type="number" min="1" max="10000" step="50" value="${limit}" title="Maximum rows to display"><button id="csv" title="Export displayed rows as CSV">CSV</button><button id="tsv" title="Export displayed rows as TSV">TSV</button></div>`;
-    return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>html,body{height:100%}body{display:flex;flex-direction:column;color:var(--vscode-foreground);font-family:var(--vscode-font-family);margin:0;padding:8px 12px;box-sizing:border-box;overflow:hidden}.bar{flex:0 0 auto;display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap}.spacer{flex:1 1 auto}.note{color:var(--vscode-descriptionForeground);font-size:.9em}label{font-size:.9em;color:var(--vscode-descriptionForeground)}input{width:74px;padding:3px 6px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,rgba(128,128,128,.55));border-radius:2px}button{padding:3px 10px;color:var(--vscode-button-foreground);background:var(--vscode-button-background);border:0;border-radius:2px;cursor:pointer}button:hover{background:var(--vscode-button-hoverBackground)}.results{flex:1 1 auto;min-height:0;overflow:auto;border:1px solid var(--vscode-panel-border,rgba(128,128,128,.35))}table{border-collapse:collapse;width:max-content;min-width:100%}th,td{padding:5px 10px;border-right:1px solid var(--vscode-panel-border,rgba(128,128,128,.25));border-bottom:1px solid var(--vscode-panel-border,rgba(128,128,128,.25));text-align:left;vertical-align:top;white-space:pre-wrap}th{position:sticky;top:0;background:var(--vscode-editor-background);font-weight:600}td{max-width:420px}</style></head><body>${toolbar}${table}<script nonce="${nonce}">const vscode=acquireVsCodeApi();const box=document.getElementById('limit');const send=()=>{const v=Number(box.value);if(Number.isFinite(v)&&v>0)vscode.postMessage({type:'limit',value:v});};box.addEventListener('change',send);box.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();send();}});document.getElementById('csv').addEventListener('click',()=>vscode.postMessage({type:'download',format:'csv'}));document.getElementById('tsv').addEventListener('click',()=>vscode.postMessage({type:'download',format:'tsv'}));</script></body></html>`;
+    return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>html,body{height:100%}body{display:flex;flex-direction:column;color:var(--vscode-foreground);font-family:var(--vscode-font-family);margin:0;padding:8px 12px;box-sizing:border-box;overflow:hidden}.bar{flex:0 0 auto;display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap}.spacer{flex:1 1 auto}.note{color:var(--vscode-descriptionForeground);font-size:.9em}label{font-size:.9em;color:var(--vscode-descriptionForeground)}input{width:74px;padding:3px 6px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,rgba(128,128,128,.55));border-radius:2px}button{padding:3px 10px;color:var(--vscode-button-foreground);background:var(--vscode-button-background);border:0;border-radius:2px;cursor:pointer}button:hover{background:var(--vscode-button-hoverBackground)}.results{flex:1 1 auto;min-height:0;overflow:auto;border:1px solid var(--vscode-panel-border,rgba(128,128,128,.3));border-radius:4px}
+table{border-collapse:separate;border-spacing:0;width:max-content;min-width:100%;font-size:var(--vscode-editor-font-size,13px)}
+thead th{position:sticky;top:0;z-index:2;background:var(--vscode-keybindingTable-headerBackground,var(--vscode-editorWidget-background,var(--vscode-editor-background)));font-weight:600;text-align:left;white-space:nowrap;padding:7px 12px;border-bottom:1px solid var(--vscode-panel-border,rgba(128,128,128,.4));letter-spacing:.01em}
+tbody td{padding:5px 12px;vertical-align:top;max-width:460px;overflow:hidden;text-overflow:ellipsis;white-space:pre-wrap;word-break:break-word;border-bottom:1px solid var(--vscode-panel-border,rgba(128,128,128,.16))}
+tbody tr:nth-child(even){background:var(--vscode-tree-tableOddRowsBackground,rgba(128,128,128,.055))}
+tbody tr:hover{background:var(--vscode-list-hoverBackground,rgba(128,128,128,.13))}
+tbody tr:last-child td,tbody tr:last-child th{border-bottom:0}
+.rownum{position:sticky;left:0;z-index:1;background:var(--vscode-editor-background);color:var(--vscode-editorLineNumber-foreground,rgba(128,128,128,.8));font-weight:400;text-align:right;padding:5px 10px;min-width:34px;user-select:none;border-right:1px solid var(--vscode-panel-border,rgba(128,128,128,.3));font-variant-numeric:tabular-nums}
+thead .rownum{z-index:3}
+tbody tr:hover .rownum{background:var(--vscode-list-hoverBackground,rgba(128,128,128,.13))}
+td.num{text-align:right;font-family:var(--vscode-editor-font-family,monospace);font-variant-numeric:tabular-nums}
+td.nul{color:var(--vscode-descriptionForeground);font-style:italic;opacity:.75}</style></head><body>${toolbar}${table}<script nonce="${nonce}">const vscode=acquireVsCodeApi();const box=document.getElementById('limit');const send=()=>{const v=Number(box.value);if(Number.isFinite(v)&&v>0)vscode.postMessage({type:'limit',value:v});};box.addEventListener('change',send);box.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();send();}});document.getElementById('csv').addEventListener('click',()=>vscode.postMessage({type:'download',format:'csv'}));document.getElementById('tsv').addEventListener('click',()=>vscode.postMessage({type:'download',format:'tsv'}));</script></body></html>`;
 }
 
 interface ConnectionFormData {
