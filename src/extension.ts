@@ -242,9 +242,42 @@ interface ResultsState {
     connection: StoredConnection;
     result: TrinoQueryResult;
     limit: number;
+    sql: string;
+    milliseconds: number;
+    executedAt: number;
+    sort?: { column: number; direction: 'asc' | 'desc' };
     subtitle?: string;
     /** Re-runs the statement with a new LIMIT when the row cap is raised. */
     refetch?: (limit: number, token?: vscode.CancellationToken) => Promise<TrinoQueryResult>;
+}
+
+/** Rows in display order: sorted when a column is selected, then capped. */
+function visibleRows(state: ResultsState): unknown[][] {
+    const rows = state.sort ? sortRows(state.result.rows, state.sort) : state.result.rows;
+    return rows.slice(0, state.limit);
+}
+
+function sortRows(rows: unknown[][], sort: { column: number; direction: 'asc' | 'desc' }): unknown[][] {
+    const factor = sort.direction === 'asc' ? 1 : -1;
+    return [...rows].sort((left, right) => {
+        const a = left[sort.column];
+        const b = right[sort.column];
+        const aEmpty = a === null || a === undefined;
+        const bEmpty = b === null || b === undefined;
+        // Nulls sort last in both directions so they never hide the real data.
+        if (aEmpty || bEmpty) { return aEmpty && bEmpty ? 0 : aEmpty ? 1 : -1; }
+        return compareValues(a, b) * factor;
+    });
+}
+
+function compareValues(a: unknown, b: unknown): number {
+    const asNumber = (value: unknown) => typeof value === 'number' ? value
+        : typeof value === 'string' && value.trim() !== '' && !Number.isNaN(Number(value)) ? Number(value)
+        : undefined;
+    const left = asNumber(a);
+    const right = asNumber(b);
+    if (left !== undefined && right !== undefined) { return left - right; }
+    return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: 'base' });
 }
 
 interface ErrorState {
@@ -305,9 +338,22 @@ class ResultsViewProvider implements vscode.WebviewViewProvider {
         if (!this.results || !request?.type) { return; }
         if (request.type === 'limit') {
             await this.applyLimit(Number(request.value));
+        } else if (request.type === 'sort') {
+            this.applySort(Number(request.value));
         } else if (request.type === 'download') {
             await exportResult(this.results, request.format === 'tsv' ? 'tsv' : 'csv');
         }
+    }
+
+    /** Cycles a column through ascending, descending, then unsorted. */
+    private applySort(column: number): void {
+        const state = this.results;
+        if (!state || !Number.isInteger(column) || column < 0 || column >= state.result.columns.length) { return; }
+        const current = state.sort;
+        state.sort = current?.column !== column ? { column, direction: 'asc' }
+            : current.direction === 'asc' ? { column, direction: 'desc' }
+            : undefined;
+        this.paint();
     }
 
     /** Raising the cap re-queries when the statement supports it; otherwise it just shows more of what was fetched. */
@@ -317,10 +363,14 @@ class ResultsViewProvider implements vscode.WebviewViewProvider {
         const state = this.results;
         if (state.refetch && limit > state.result.rows.length) {
             try {
+                const started = Date.now();
                 state.result = await vscode.window.withProgress(
                     { location: vscode.ProgressLocation.Window, title: `Loading ${limit.toLocaleString()} rows…`, cancellable: true },
                     (_, token) => state.refetch!(limit, token)
                 );
+                state.milliseconds = Date.now() - started;
+                state.executedAt = Date.now();
+                state.sql = state.sql.replace(/LIMIT \d+$/, `LIMIT ${limit}`);
             } catch (error) {
                 await this.showError({
                     connection: state.connection,
@@ -342,7 +392,7 @@ function clampRowLimit(value: number): number {
 
 /** Writes the rows currently held in the view to a delimited file. */
 async function exportResult(state: ResultsState, format: 'csv' | 'tsv'): Promise<void> {
-    const rows = state.result.rows.slice(0, state.limit);
+    const rows = visibleRows(state);
     const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     const target = await vscode.window.showSaveDialog({
         saveLabel: `Export ${format.toUpperCase()}`,
@@ -850,12 +900,19 @@ async function previewTable(store: ConnectionStore, secrets: vscode.SecretStorag
     const client = new TrinoClient(secrets, connection);
     const fetchRows = (rowLimit: number, token?: vscode.CancellationToken) =>
         client.query(`SELECT * FROM ${qualified} LIMIT ${rowLimit}`, token);
+    const started = Date.now();
     try {
         const result = await vscode.window.withProgress(
             { location: vscode.ProgressLocation.Window, title: `Loading ${item.table}…`, cancellable: true },
             (_, token) => fetchRows(limit, token)
         );
-        await showSqlResults(results, result, connection, undefined, fetchRows);
+        await showSqlResults(
+            results,
+            result,
+            connection,
+            { sql: `SELECT * FROM ${qualified} LIMIT ${limit}`, milliseconds: Date.now() - started },
+            fetchRows
+        );
     } catch (error) {
         await showQueryError(results, error, connection, `SELECT * FROM ${qualified} LIMIT ${limit}`);
     }
@@ -895,8 +952,9 @@ async function runActiveSql(store: ConnectionStore, secrets: vscode.SecretStorag
             { location: vscode.ProgressLocation.Window, title: `Executing on ${connection.name}…`, cancellable: true },
             (_, token) => new TrinoClient(secrets, connection).query(sql, token)
         );
-        status.record(editor.document.uri, { line, milliseconds: Date.now() - started, rows: result.rows.length });
-        await showSqlResults(results, result, connection);
+        const elapsed = Date.now() - started;
+        status.record(editor.document.uri, { line, milliseconds: elapsed, rows: result.rows.length });
+        await showSqlResults(results, result, connection, { sql, milliseconds: elapsed });
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         status.record(editor.document.uri, { line, milliseconds: Date.now() - started, rows: 0, error: summarize(message) });
@@ -916,10 +974,18 @@ async function showSqlResults(
     results: ResultsViewProvider,
     result: TrinoQueryResult,
     connection: StoredConnection,
-    subtitle?: string,
+    query: { sql: string; milliseconds: number },
     refetch?: ResultsState['refetch']
 ): Promise<void> {
-    await results.showResults({ connection, result, limit: previewRowLimit(), subtitle, refetch });
+    await results.showResults({
+        connection,
+        result,
+        limit: previewRowLimit(),
+        sql: query.sql,
+        milliseconds: query.milliseconds,
+        executedAt: Date.now(),
+        refetch
+    });
 }
 
 async function showConnectionWindow(
@@ -1005,7 +1071,7 @@ function queryErrorHtml(webview: vscode.Webview, state: ErrorState): string {
 
 function sqlResultsHtml(webview: vscode.Webview, state: ResultsState): string {
     const { result, connection, limit } = state;
-    const displayedRows = result.rows.slice(0, limit);
+    const displayedRows = visibleRows(state);
     const nonce = String(Date.now());
     const escape = (value: unknown) => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     const format = (value: unknown) => value === null ? 'NULL' : typeof value === 'object' ? JSON.stringify(value) : String(value);
@@ -1017,7 +1083,10 @@ function sqlResultsHtml(webview: vscode.Webview, state: ResultsState): string {
         const title = text.length > 60 ? ` title="${escape(text)}"` : '';
         return `<td class="${classes}"${title}>${escape(text)}</td>`;
     };
-    const headers = `<th class="rownum"></th>${result.columns.map(column => `<th>${escape(column)}</th>`).join('')}`;
+    const arrow = (index: number) => state.sort?.column === index ? (state.sort.direction === 'asc' ? ' ▲' : ' ▼') : '';
+    const headers = `<th class="rownum"></th>${result.columns
+        .map((column, index) => `<th class="sortable${state.sort?.column === index ? ' sorted' : ''}" data-col="${index}" title="Sort by ${escape(column)}">${escape(column)}<span class="arrow">${arrow(index)}</span></th>`)
+        .join('')}`;
     const rows = displayedRows
         .map((row, index) => `<tr><th class="rownum">${index + 1}</th>${result.columns.map((_, column) => cell(row[column])).join('')}</tr>`)
         .join('');
@@ -1028,8 +1097,32 @@ function sqlResultsHtml(webview: vscode.Webview, state: ResultsState): string {
     const table = result.columns.length
         ? `<div class="results"><table><thead><tr>${headers}</tr></thead><tbody>${rows}</tbody></table></div>`
         : '<p>Statement completed. No rows returned.</p>';
-    const toolbar = `<div class="bar"><span class="note">${escape(connection.name)} — ${note}</span><span class="spacer"></span><label for="limit">Limit</label><input id="limit" type="number" min="1" max="10000" step="50" value="${limit}" title="Maximum rows to display"><button id="csv" title="Export displayed rows as CSV">CSV</button><button id="tsv" title="Export displayed rows as TSV">TSV</button></div>`;
-    return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>html,body{height:100%}body{display:flex;flex-direction:column;color:var(--vscode-foreground);font-family:var(--vscode-font-family);margin:0;padding:8px 12px;box-sizing:border-box;overflow:hidden}.bar{flex:0 0 auto;display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap}.spacer{flex:1 1 auto}.note{color:var(--vscode-descriptionForeground);font-size:.9em}label{font-size:.9em;color:var(--vscode-descriptionForeground)}input{width:74px;padding:3px 6px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,rgba(128,128,128,.55));border-radius:2px}button{padding:3px 10px;color:var(--vscode-button-foreground);background:var(--vscode-button-background);border:0;border-radius:2px;cursor:pointer}button:hover{background:var(--vscode-button-hoverBackground)}.results{flex:1 1 auto;min-height:0;overflow:auto;border:1px solid var(--vscode-panel-border,rgba(128,128,128,.3));border-radius:4px}
+    const info = [
+        ['Connection', `${connection.name} (${connection.url})`],
+        ['User', connection.user],
+        ['Executed', new Date(state.executedAt).toLocaleString()],
+        ['Duration', formatDuration(state.milliseconds)],
+        ['Rows fetched', fetched.toLocaleString()],
+        ['Rows shown', `${displayedRows.length.toLocaleString()} (limit ${limit.toLocaleString()})`],
+        ['Columns', String(result.columns.length)],
+        ['Sorted by', state.sort ? `${result.columns[state.sort.column]} ${state.sort.direction === 'asc' ? 'ascending' : 'descending'}` : 'none']
+    ].map(([label, value]) => `<dt>${escape(label)}</dt><dd>${escape(value)}</dd>`).join('');
+    const infoPanel = `<div id="info" class="info" hidden><dl>${info}</dl>${state.sql ? `<div class="sqlwrap"><div class="sqllabel">Statement</div><pre>${escape(state.sql)}</pre></div>` : ''}</div>`;
+    const toolbar = `<div class="bar"><span class="note"><b>${escape(connection.name)}</b> — ${note} · ${formatDuration(state.milliseconds)}</span><span class="spacer"></span><label for="limit">Limit</label><input id="limit" type="number" min="1" max="10000" step="50" value="${limit}" title="Maximum rows to display"><button id="info-toggle" class="ghost" title="Show query details">Info</button><button id="csv" title="Export displayed rows as CSV">CSV</button><button id="tsv" title="Export displayed rows as TSV">TSV</button></div>${infoPanel}`;
+    return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>html,body{height:100%}body{display:flex;flex-direction:column;color:var(--vscode-foreground);font-family:var(--vscode-font-family);margin:0;padding:8px 12px;box-sizing:border-box;overflow:hidden}.bar{flex:0 0 auto;display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap}.spacer{flex:1 1 auto}.note{color:var(--vscode-descriptionForeground);font-size:.9em}label{font-size:.9em;color:var(--vscode-descriptionForeground)}input{width:74px;padding:3px 6px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,rgba(128,128,128,.55));border-radius:2px}button{padding:3px 10px;color:var(--vscode-button-foreground);background:var(--vscode-button-background);border:0;border-radius:2px;cursor:pointer}button:hover{background:var(--vscode-button-hoverBackground)}
+button.ghost{background:transparent;color:var(--vscode-foreground);border:1px solid var(--vscode-panel-border,rgba(128,128,128,.45))}
+button.ghost:hover{background:var(--vscode-toolbar-hoverBackground,rgba(128,128,128,.18))}
+.info{flex:0 0 auto;margin:0 0 8px;padding:10px 12px;border:1px solid var(--vscode-panel-border,rgba(128,128,128,.35));border-radius:4px;background:var(--vscode-textBlockQuote-background,rgba(128,128,128,.07));max-height:38%;overflow:auto}
+.info dl{display:grid;grid-template-columns:auto 1fr;gap:3px 14px;margin:0;font-size:.9em}
+.info dt{color:var(--vscode-descriptionForeground);white-space:nowrap}
+.info dd{margin:0}
+.sqlwrap{margin-top:10px}
+.sqllabel{color:var(--vscode-descriptionForeground);font-size:.85em;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px}
+.info pre{margin:0;padding:8px 10px;white-space:pre-wrap;word-break:break-word;font-family:var(--vscode-editor-font-family,monospace);font-size:var(--vscode-editor-font-size,12px);background:var(--vscode-textCodeBlock-background,rgba(128,128,128,.12));border-radius:3px}
+th.sortable{cursor:pointer}
+th.sortable:hover{background-color:var(--vscode-list-hoverBackground,rgba(128,128,128,.2))}
+th.sorted{color:var(--vscode-textLink-foreground,inherit)}
+.arrow{font-size:.85em;opacity:.9}.results{flex:1 1 auto;min-height:0;overflow:auto;border:1px solid var(--vscode-panel-border,rgba(128,128,128,.3));border-radius:4px}
 table{border-collapse:separate;border-spacing:0;width:max-content;min-width:100%;font-size:var(--vscode-editor-font-size,13px)}
 thead th{position:sticky;top:0;z-index:2;background-color:var(--vscode-panel-background,var(--vscode-editor-background,#1f1f1f));background-clip:padding-box;box-shadow:0 1px 0 var(--vscode-panel-border,rgba(128,128,128,.4));border-right:1px solid var(--vscode-panel-border,rgba(128,128,128,.35));font-weight:600;text-align:left;white-space:nowrap;padding:7px 14px 7px 12px;letter-spacing:.01em}
 tbody td{padding:5px 12px;vertical-align:top;max-width:460px;overflow:hidden;text-overflow:ellipsis;white-space:pre-wrap;word-break:break-word;border-bottom:1px solid var(--vscode-panel-border,rgba(128,128,128,.16));border-right:1px solid var(--vscode-panel-border,rgba(128,128,128,.24))}
@@ -1043,6 +1136,8 @@ thead .rownum{z-index:3}
 .grip:hover,.grip.active{background:var(--vscode-focusBorder,rgba(128,128,128,.7))}
 td.num{text-align:right;font-family:var(--vscode-editor-font-family,monospace);font-variant-numeric:tabular-nums}
 td.nul{color:var(--vscode-descriptionForeground);font-style:italic;opacity:.75}</style></head><body>${toolbar}${table}<script nonce="${nonce}">const vscode=acquireVsCodeApi();const box=document.getElementById('limit');const send=()=>{const v=Number(box.value);if(Number.isFinite(v)&&v>0)vscode.postMessage({type:'limit',value:v});};box.addEventListener('change',send);box.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();send();}});document.getElementById('csv').addEventListener('click',()=>vscode.postMessage({type:'download',format:'csv'}));document.getElementById('tsv').addEventListener('click',()=>vscode.postMessage({type:'download',format:'tsv'}));
+const info=document.getElementById('info');document.getElementById('info-toggle').addEventListener('click',()=>{info.hidden=!info.hidden;});
+document.querySelectorAll('thead th.sortable').forEach(th=>{th.addEventListener('click',e=>{if(e.target.classList.contains('grip'))return;vscode.postMessage({type:'sort',value:Number(th.dataset.col)});});});
 document.querySelectorAll('thead th:not(.rownum)').forEach(th=>{const grip=document.createElement('span');grip.className='grip';th.appendChild(grip);grip.addEventListener('mousedown',e=>{e.preventDefault();e.stopPropagation();const startX=e.clientX;const startWidth=th.offsetWidth;grip.classList.add('active');document.body.style.cursor='col-resize';const move=ev=>{const width=Math.max(48,startWidth+ev.clientX-startX);th.style.width=width+'px';th.style.minWidth=width+'px';th.style.maxWidth=width+'px';};const stop=()=>{grip.classList.remove('active');document.body.style.cursor='';document.removeEventListener('mousemove',move);document.removeEventListener('mouseup',stop);};document.addEventListener('mousemove',move);document.addEventListener('mouseup',stop);});grip.addEventListener('dblclick',e=>{e.preventDefault();th.style.width='';th.style.minWidth='';th.style.maxWidth='';});});</script></body></html>`;
 }
 
