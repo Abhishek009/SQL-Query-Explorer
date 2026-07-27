@@ -350,8 +350,8 @@ class ExplorerItem extends vscode.TreeItem {
         item.description = 'TABLE';
         item.iconPath = new vscode.ThemeIcon('list-flat');
         item.tooltip = `${catalog}.${schema}.${table}`;
-        // Opens on click or double-click, following workbench.list.openMode.
-        item.command = { command: 'trino.previewTable', title: 'Preview Table Data', arguments: [item] };
+        // Fires on every click; the handler previews only on a double click.
+        item.command = { command: 'trino.tableClicked', title: 'Preview Table Data', arguments: [item] };
         return item;
     }
 
@@ -425,6 +425,9 @@ export function activate(context: vscode.ExtensionContext): void {
         await showConnectionWindow(context, store, provider, connection);
     });
     register('trino.previewTable', async (item?: ExplorerItem) => {
+        await previewTable(store, context.secrets, item, true);
+    });
+    register('trino.tableClicked', async (item?: ExplorerItem) => {
         await previewTable(store, context.secrets, item);
     });
     register('trino.openQuery', async () => { await openSqlQueryEditor(store); });
@@ -455,10 +458,25 @@ async function resolveConnection(store: ConnectionStore): Promise<StoredConnecti
     return connection;
 }
 
+const DOUBLE_CLICK_MS = 500;
+let lastClick: { key: string; at: number } | undefined;
+
+/**
+ * The tree API has no double-click event and fires TreeItem.command on every
+ * click, so treat two clicks on the same table within DOUBLE_CLICK_MS as one.
+ */
+function isDoubleClick(key: string): boolean {
+    const now = Date.now();
+    const repeated = lastClick?.key === key && now - lastClick.at <= DOUBLE_CLICK_MS;
+    lastClick = repeated ? undefined : { key, at: now };
+    return repeated;
+}
+
 /** Runs a bounded SELECT for the clicked table and shows it in the results grid. */
-async function previewTable(store: ConnectionStore, secrets: vscode.SecretStorage, item?: ExplorerItem): Promise<void> {
+async function previewTable(store: ConnectionStore, secrets: vscode.SecretStorage, item?: ExplorerItem, force = false): Promise<void> {
     const connection = store.get(item?.connectionId);
     if (!connection || !item?.catalog || !item.schema || !item.table) { return; }
+    if (!force && !isDoubleClick(`${connection.id}/${item.catalog}/${item.schema}/${item.table}`)) { return; }
     const qualified = `${quoteIdentifier(item.catalog)}.${quoteIdentifier(item.schema)}.${quoteIdentifier(item.table)}`;
     const limit = previewRowLimit();
     try {

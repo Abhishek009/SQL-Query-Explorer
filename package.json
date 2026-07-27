@@ -65,6 +65,10 @@
         "icon": "$(table)"
       },
       {
+        "command": "trino.tableClicked",
+        "title": "Trino: Open Table From Tree"
+      },
+      {
         "command": "trino.openQuery",
         "title": "Trino: New SQL Query",
         "icon": "$(new-file)"
@@ -188,6 +192,10 @@
         },
         {
           "command": "trino.previewTable",
+          "when": "false"
+        },
+        {
+          "command": "trino.tableClicked",
           "when": "false"
         }
       ],
