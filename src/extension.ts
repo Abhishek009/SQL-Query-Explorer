@@ -238,28 +238,142 @@ function quoteIdentifier(identifier: string): string {
  * than in an editor tab. The view is created lazily, so the first result has to
  * reveal it before its webview exists.
  */
+interface ResultsState {
+    connection: StoredConnection;
+    result: TrinoQueryResult;
+    limit: number;
+    subtitle?: string;
+    /** Re-runs the statement with a new LIMIT when the row cap is raised. */
+    refetch?: (limit: number, token?: vscode.CancellationToken) => Promise<TrinoQueryResult>;
+}
+
+interface ErrorState {
+    connection: StoredConnection;
+    sql: string;
+    message: string;
+    details?: string;
+}
+
 class ResultsViewProvider implements vscode.WebviewViewProvider {
     public static readonly viewId = 'trinoResultsView';
     private view: vscode.WebviewView | undefined;
-    private render: ((webview: vscode.Webview) => string) | undefined;
+    private results: ResultsState | undefined;
+    private failure: ErrorState | undefined;
 
     public resolveWebviewView(view: vscode.WebviewView): void {
         this.view = view;
-        view.webview.options = { enableScripts: false };
-        if (this.render) { view.webview.html = this.render(view.webview); }
+        view.webview.options = { enableScripts: true };
+        view.webview.onDidReceiveMessage((message: unknown) => void this.handle(message));
+        this.paint();
         view.onDidDispose(() => { this.view = undefined; });
     }
 
-    public async show(render: (webview: vscode.Webview) => string): Promise<void> {
-        this.render = render;
+    public async showResults(state: ResultsState): Promise<void> {
+        this.results = state;
+        this.failure = undefined;
+        await this.reveal();
+        this.paint();
+    }
+
+    public async showError(state: ErrorState): Promise<void> {
+        this.failure = state;
+        this.results = undefined;
+        await this.reveal();
+        this.paint();
+    }
+
+    private async reveal(): Promise<void> {
         if (!this.view) {
             // Focusing the view forces VS Code to construct it, which resolves it above.
             await vscode.commands.executeCommand(`${ResultsViewProvider.viewId}.focus`, { preserveFocus: true });
         }
-        if (!this.view) { return; }
-        this.view.webview.html = render(this.view.webview);
-        this.view.show(true);
+        this.view?.show(true);
     }
+
+    private paint(): void {
+        if (!this.view) { return; }
+        const webview = this.view.webview;
+        this.view.webview.html = this.failure
+            ? queryErrorHtml(webview, this.failure)
+            : this.results
+                ? sqlResultsHtml(webview, this.results)
+                : emptyResultsHtml(webview);
+    }
+
+    private async handle(message: unknown): Promise<void> {
+        const request = message as { type?: string; value?: number; format?: string };
+        if (!this.results || !request?.type) { return; }
+        if (request.type === 'limit') {
+            await this.applyLimit(Number(request.value));
+        } else if (request.type === 'download') {
+            await exportResult(this.results, request.format === 'tsv' ? 'tsv' : 'csv');
+        }
+    }
+
+    /** Raising the cap re-queries when the statement supports it; otherwise it just shows more of what was fetched. */
+    private async applyLimit(requested: number): Promise<void> {
+        if (!this.results || !Number.isFinite(requested)) { return; }
+        const limit = clampRowLimit(requested);
+        const state = this.results;
+        if (state.refetch && limit > state.result.rows.length) {
+            try {
+                state.result = await vscode.window.withProgress(
+                    { location: vscode.ProgressLocation.Window, title: `Loading ${limit.toLocaleString()} rows…`, cancellable: true },
+                    (_, token) => state.refetch!(limit, token)
+                );
+            } catch (error) {
+                await this.showError({
+                    connection: state.connection,
+                    sql: '',
+                    message: error instanceof Error ? error.message : String(error),
+                    details: error instanceof TrinoRequestError ? error.details : undefined
+                });
+                return;
+            }
+        }
+        state.limit = limit;
+        this.paint();
+    }
+}
+
+function clampRowLimit(value: number): number {
+    return Math.min(Math.max(Math.trunc(value) || 1, 1), 10_000);
+}
+
+/** Writes the rows currently held in the view to a delimited file. */
+async function exportResult(state: ResultsState, format: 'csv' | 'tsv'): Promise<void> {
+    const rows = state.result.rows.slice(0, state.limit);
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const target = await vscode.window.showSaveDialog({
+        saveLabel: `Export ${format.toUpperCase()}`,
+        defaultUri: vscode.Uri.file(`trino-results-${stamp}.${format}`),
+        filters: format === 'csv' ? { 'CSV files': ['csv'] } : { 'TSV files': ['tsv'] }
+    });
+    if (!target) { return; }
+    const text = toDelimitedText(state.result.columns, rows, format);
+    await vscode.workspace.fs.writeFile(target, Buffer.from(text, 'utf8'));
+    const open = await vscode.window.showInformationMessage(
+        `Exported ${rows.length.toLocaleString()} row(s) to ${target.fsPath}.`, 'Open File'
+    );
+    if (open) { await vscode.window.showTextDocument(target); }
+}
+
+function toDelimitedText(columns: string[], rows: unknown[][], format: 'csv' | 'tsv'): string {
+    const delimiter = format === 'csv' ? ',' : '\t';
+    const cell = (value: unknown): string => {
+        if (value === null || value === undefined) { return ''; }
+        const text = typeof value === 'object' ? JSON.stringify(value) : String(value);
+        if (format === 'tsv') {
+            // Tabs and newlines would break the row/column structure outright.
+            return text.replace(/[\t\r\n]+/g, ' ');
+        }
+        return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+    };
+    const lines = [columns.map(cell).join(delimiter)];
+    for (const row of rows) {
+        lines.push(columns.map((_, index) => cell(row[index])).join(delimiter));
+    }
+    return `${lines.join('\r\n')}\r\n`;
 }
 
 interface QueryOutcome {
@@ -611,16 +725,17 @@ async function previewTable(store: ConnectionStore, secrets: vscode.SecretStorag
     if (!force && !isDoubleClick(`${connection.id}/${item.catalog}/${item.schema}/${item.table}`)) { return; }
     const qualified = `${quoteIdentifier(item.catalog)}.${quoteIdentifier(item.schema)}.${quoteIdentifier(item.table)}`;
     const limit = previewRowLimit();
-    const sql = `SELECT * FROM ${qualified} LIMIT ${limit}`;
+    const client = new TrinoClient(secrets, connection);
+    const fetchRows = (rowLimit: number, token?: vscode.CancellationToken) =>
+        client.query(`SELECT * FROM ${qualified} LIMIT ${rowLimit}`, token);
     try {
         const result = await vscode.window.withProgress(
             { location: vscode.ProgressLocation.Window, title: `Loading ${item.table}…`, cancellable: true },
-            (_, token) => new TrinoClient(secrets, connection).query(sql, token)
+            (_, token) => fetchRows(limit, token)
         );
-        const shown = `${result.rows.length.toLocaleString()} row(s) from ${item.catalog}.${item.schema}.${item.table}`;
-        await showSqlResults(results, result, connection, `${shown} (limit ${limit.toLocaleString()}).`);
+        await showSqlResults(results, result, connection, undefined, fetchRows);
     } catch (error) {
-        await showQueryError(results, error, connection, sql);
+        await showQueryError(results, error, connection, `SELECT * FROM ${qualified} LIMIT ${limit}`);
     }
 }
 
@@ -675,8 +790,14 @@ function firstStatementLine(document: vscode.TextDocument): number {
     return 0;
 }
 
-async function showSqlResults(results: ResultsViewProvider, result: TrinoQueryResult, connection: StoredConnection, subtitle?: string): Promise<void> {
-    await results.show(webview => sqlResultsHtml(webview, result, connection, subtitle));
+async function showSqlResults(
+    results: ResultsViewProvider,
+    result: TrinoQueryResult,
+    connection: StoredConnection,
+    subtitle?: string,
+    refetch?: ResultsState['refetch']
+): Promise<void> {
+    await results.showResults({ connection, result, limit: previewRowLimit(), subtitle, refetch });
 }
 
 async function showConnectionWindow(
@@ -739,30 +860,44 @@ async function showConnectionWindow(
 
 /** Failures land in the same panel as results, with the full server response. */
 async function showQueryError(results: ResultsViewProvider, error: unknown, connection: StoredConnection, sql: string): Promise<void> {
-    const message = error instanceof Error ? error.message : String(error);
-    const details = error instanceof TrinoRequestError ? error.details : undefined;
-    await results.show(webview => queryErrorHtml(webview, connection, sql, message, details));
+    await results.showError({
+        connection,
+        sql,
+        message: error instanceof Error ? error.message : String(error),
+        details: error instanceof TrinoRequestError ? error.details : undefined
+    });
 }
 
-function queryErrorHtml(webview: vscode.Webview, connection: StoredConnection, sql: string, message: string, details?: string): string {
+function emptyResultsHtml(webview: vscode.Webview): string {
+    return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline';"></head><body style="color:var(--vscode-descriptionForeground);font-family:var(--vscode-font-family);padding:14px">Run a query to see results here.</body></html>`;
+}
+
+function queryErrorHtml(webview: vscode.Webview, state: ErrorState): string {
+    const { connection, sql, message, details } = state;
     const escape = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     const detailBlock = details && details.trim() && details.trim() !== message.trim()
         ? `<h2>Server response</h2><pre class="details">${escape(details)}</pre>`
         : '';
-    return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline';"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>body{color:var(--vscode-foreground);font-family:var(--vscode-font-family);margin:0;padding:10px 14px;height:100%;box-sizing:border-box;overflow:auto}h1{font-size:1.05em;margin:0 0 4px;color:var(--vscode-errorForeground)}h2{font-size:.95em;margin:20px 0 6px;color:var(--vscode-descriptionForeground);text-transform:uppercase;letter-spacing:.04em}.note{margin:0 0 14px;color:var(--vscode-descriptionForeground)}pre{font-family:var(--vscode-editor-font-family,monospace);font-size:var(--vscode-editor-font-size,13px);white-space:pre-wrap;word-break:break-word;padding:12px;border:1px solid var(--vscode-panel-border,rgba(128,128,128,.35));border-radius:3px;background:var(--vscode-textCodeBlock-background,rgba(128,128,128,.1));margin:0}pre.message{border-left:3px solid var(--vscode-errorForeground)}</style></head><body><h1>Query failed</h1><p class="note">${escape(connection.name)} — ${escape(connection.url)}</p><pre class="message">${escape(message)}</pre>${detailBlock}<h2>Statement</h2><pre>${escape(sql)}</pre></body></html>`;
+    return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline';"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>body{color:var(--vscode-foreground);font-family:var(--vscode-font-family);margin:0;padding:10px 14px;height:100%;box-sizing:border-box;overflow:auto}h1{font-size:1.05em;margin:0 0 4px;color:var(--vscode-errorForeground)}h2{font-size:.95em;margin:20px 0 6px;color:var(--vscode-descriptionForeground);text-transform:uppercase;letter-spacing:.04em}.note{margin:0 0 14px;color:var(--vscode-descriptionForeground)}pre{font-family:var(--vscode-editor-font-family,monospace);font-size:var(--vscode-editor-font-size,13px);white-space:pre-wrap;word-break:break-word;padding:12px;border:1px solid var(--vscode-panel-border,rgba(128,128,128,.35));border-radius:3px;background:var(--vscode-textCodeBlock-background,rgba(128,128,128,.1));margin:0}pre.message{border-left:3px solid var(--vscode-errorForeground)}</style></head><body><h1>Query failed</h1><p class="note">${escape(connection.name)} — ${escape(connection.url)}</p><pre class="message">${escape(message)}</pre>${detailBlock}${sql ? `<h2>Statement</h2><pre>${escape(sql)}</pre>` : ''}</body></html>`;
 }
 
-function sqlResultsHtml(webview: vscode.Webview, result: TrinoQueryResult, connection: StoredConnection, subtitle?: string): string {
-    const displayedRows = result.rows.slice(0, 1_000);
+function sqlResultsHtml(webview: vscode.Webview, state: ResultsState): string {
+    const { result, connection, limit } = state;
+    const displayedRows = result.rows.slice(0, limit);
+    const nonce = String(Date.now());
     const escape = (value: unknown) => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     const format = (value: unknown) => value === null ? 'NULL' : typeof value === 'object' ? JSON.stringify(value) : String(value);
     const headers = result.columns.map(column => `<th>${escape(column)}</th>`).join('');
     const rows = displayedRows.map(row => `<tr>${result.columns.map((_, index) => `<td>${escape(format(row[index]))}</td>`).join('')}</tr>`).join('');
-    const note = subtitle ?? (result.rows.length > displayedRows.length
-        ? `Showing the first ${displayedRows.length.toLocaleString()} of ${result.rows.length.toLocaleString()} rows.`
-        : `${result.rows.length.toLocaleString()} row(s) returned.`);
-    const table = result.columns.length ? `<div class="results"><table><thead><tr>${headers}</tr></thead><tbody>${rows}</tbody></table></div>` : '<p>Statement completed. No rows returned.</p>';
-    return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline';"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>html,body{height:100%}body{display:flex;flex-direction:column;color:var(--vscode-foreground);font-family:var(--vscode-font-family);margin:0;padding:10px 14px;box-sizing:border-box;overflow:hidden}.note{flex:0 0 auto;margin:0 0 8px;color:var(--vscode-descriptionForeground);font-size:.9em}.results{flex:1 1 auto;min-height:0;overflow:auto;border:1px solid var(--vscode-panel-border,rgba(128,128,128,.35))}table{border-collapse:collapse;width:max-content;min-width:100%}th,td{padding:6px 10px;border-right:1px solid var(--vscode-panel-border);border-bottom:1px solid var(--vscode-panel-border);text-align:left;vertical-align:top;white-space:pre-wrap}th{position:sticky;top:0;background:var(--vscode-editor-background);font-weight:600}td{max-width:420px}</style></head><body><p class="note">${escape(connection.name)} — ${note}</p>${table}</body></html>`;
+    const fetched = result.rows.length;
+    const note = state.subtitle ?? (fetched > displayedRows.length
+        ? `${displayedRows.length.toLocaleString()} of ${fetched.toLocaleString()} rows`
+        : `${fetched.toLocaleString()} row(s)`);
+    const table = result.columns.length
+        ? `<div class="results"><table><thead><tr>${headers}</tr></thead><tbody>${rows}</tbody></table></div>`
+        : '<p>Statement completed. No rows returned.</p>';
+    const toolbar = `<div class="bar"><span class="note">${escape(connection.name)} — ${note}</span><span class="spacer"></span><label for="limit">Limit</label><input id="limit" type="number" min="1" max="10000" step="50" value="${limit}" title="Maximum rows to display"><button id="csv" title="Export displayed rows as CSV">CSV</button><button id="tsv" title="Export displayed rows as TSV">TSV</button></div>`;
+    return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>html,body{height:100%}body{display:flex;flex-direction:column;color:var(--vscode-foreground);font-family:var(--vscode-font-family);margin:0;padding:8px 12px;box-sizing:border-box;overflow:hidden}.bar{flex:0 0 auto;display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap}.spacer{flex:1 1 auto}.note{color:var(--vscode-descriptionForeground);font-size:.9em}label{font-size:.9em;color:var(--vscode-descriptionForeground)}input{width:74px;padding:3px 6px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,rgba(128,128,128,.55));border-radius:2px}button{padding:3px 10px;color:var(--vscode-button-foreground);background:var(--vscode-button-background);border:0;border-radius:2px;cursor:pointer}button:hover{background:var(--vscode-button-hoverBackground)}.results{flex:1 1 auto;min-height:0;overflow:auto;border:1px solid var(--vscode-panel-border,rgba(128,128,128,.35))}table{border-collapse:collapse;width:max-content;min-width:100%}th,td{padding:5px 10px;border-right:1px solid var(--vscode-panel-border,rgba(128,128,128,.25));border-bottom:1px solid var(--vscode-panel-border,rgba(128,128,128,.25));text-align:left;vertical-align:top;white-space:pre-wrap}th{position:sticky;top:0;background:var(--vscode-editor-background);font-weight:600}td{max-width:420px}</style></head><body>${toolbar}${table}<script nonce="${nonce}">const vscode=acquireVsCodeApi();const box=document.getElementById('limit');const send=()=>{const v=Number(box.value);if(Number.isFinite(v)&&v>0)vscode.postMessage({type:'limit',value:v});};box.addEventListener('change',send);box.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();send();}});document.getElementById('csv').addEventListener('click',()=>vscode.postMessage({type:'download',format:'csv'}));document.getElementById('tsv').addEventListener('click',()=>vscode.postMessage({type:'download',format:'tsv'}));</script></body></html>`;
 }
 
 interface ConnectionFormData {
