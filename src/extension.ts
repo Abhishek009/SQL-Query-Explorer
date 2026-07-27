@@ -241,6 +241,9 @@ class QueryStatusProvider implements vscode.CodeLensProvider {
     public record(uri: vscode.Uri, outcome: QueryOutcome): void {
         this.outcomes.set(uri.toString(), outcome);
         this.changed.fire();
+        // Opening the results panel can leave the editor inactive, which defers the
+        // redraw; a second notification once that settles keeps the lens immediate.
+        setTimeout(() => this.changed.fire(), 0);
     }
 
     public forget(uri: vscode.Uri): void {
@@ -594,7 +597,8 @@ function showSqlResults(result: TrinoQueryResult, connection: StoredConnection, 
     const panel = vscode.window.createWebviewPanel(
         'trinoQueryResults',
         title ?? `Trino Results — ${connection.name}`,
-        vscode.ViewColumn.Beside,
+        // Keep the caret in the SQL editor so its timing CodeLens redraws at once.
+        { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
         { enableScripts: false }
     );
     panel.webview.html = sqlResultsHtml(panel.webview, result, connection, subtitle);
