@@ -222,6 +222,50 @@ function quoteIdentifier(identifier: string): string {
     return `"${identifier.replace(/"/g, '""')}"`;
 }
 
+interface QueryOutcome {
+    line: number;
+    milliseconds: number;
+    rows: number;
+    error?: string;
+}
+
+/**
+ * Reports the last run's timing above the statement it belongs to. A CodeLens is
+ * the only supported way to draw a line of text above editor content.
+ */
+class QueryStatusProvider implements vscode.CodeLensProvider {
+    private readonly changed = new vscode.EventEmitter<void>();
+    public readonly onDidChangeCodeLenses = this.changed.event;
+    private readonly outcomes = new Map<string, QueryOutcome>();
+
+    public record(uri: vscode.Uri, outcome: QueryOutcome): void {
+        this.outcomes.set(uri.toString(), outcome);
+        this.changed.fire();
+    }
+
+    public forget(uri: vscode.Uri): void {
+        if (this.outcomes.delete(uri.toString())) { this.changed.fire(); }
+    }
+
+    public provideCodeLenses(document: vscode.TextDocument): vscode.CodeLens[] {
+        const outcome = this.outcomes.get(document.uri.toString());
+        if (!outcome) { return []; }
+        const line = Math.min(outcome.line, Math.max(document.lineCount - 1, 0));
+        const elapsed = formatDuration(outcome.milliseconds);
+        const title = outcome.error
+            ? `$(error) Failed in ${elapsed} — ${outcome.error}`
+            : `$(check) ${elapsed} · ${outcome.rows.toLocaleString()} row(s)`;
+        return [new vscode.CodeLens(new vscode.Range(line, 0, line, 0), { title, command: '' })];
+    }
+}
+
+function formatDuration(milliseconds: number): string {
+    if (milliseconds < 1_000) { return `${Math.round(milliseconds)}ms`; }
+    if (milliseconds < 60_000) { return `${(milliseconds / 1_000).toFixed(2)}s`; }
+    const minutes = Math.floor(milliseconds / 60_000);
+    return `${minutes}m ${Math.round((milliseconds % 60_000) / 1_000)}s`;
+}
+
 type ExplorerNodeKind = 'connection' | 'catalog' | 'schema' | 'table' | 'column' | 'empty';
 
 class TrinoExplorerProvider implements vscode.TreeDataProvider<ExplorerItem> {
@@ -368,10 +412,13 @@ class ExplorerItem extends vscode.TreeItem {
 export function activate(context: vscode.ExtensionContext): void {
     const store = new ConnectionStore(context);
     const provider = new TrinoExplorerProvider(store, context.secrets);
+    const status = new QueryStatusProvider();
     void store.migrateLegacyConnection();
 
     context.subscriptions.push(
         vscode.window.registerTreeDataProvider('trinoCatalogs', provider),
+        vscode.languages.registerCodeLensProvider({ language: 'sql' }, status),
+        vscode.workspace.onDidCloseTextDocument(document => status.forget(document.uri)),
         store.onDidChange(() => provider.refresh()),
         vscode.workspace.onDidChangeConfiguration(event => {
             if (event.affectsConfiguration('trino.connections')) { provider.refresh(); }
@@ -431,7 +478,7 @@ export function activate(context: vscode.ExtensionContext): void {
         await previewTable(store, context.secrets, item);
     });
     register('trino.openQuery', async () => { await openSqlQueryEditor(store); });
-    register('trino.runActiveSql', async () => { await runActiveSql(store, context.secrets); });
+    register('trino.runActiveSql', async () => { await runActiveSql(store, context.secrets, status); });
 }
 
 async function pickConnection(store: ConnectionStore, placeHolder: string): Promise<StoredConnection | undefined> {
@@ -507,7 +554,7 @@ async function openSqlQueryEditor(store: ConnectionStore): Promise<void> {
     await vscode.window.showTextDocument(document, { preview: false });
 }
 
-async function runActiveSql(store: ConnectionStore, secrets: vscode.SecretStorage): Promise<void> {
+async function runActiveSql(store: ConnectionStore, secrets: vscode.SecretStorage, status: QueryStatusProvider): Promise<void> {
     const editor = vscode.window.activeTextEditor;
     if (!editor || editor.document.languageId !== 'sql') {
         vscode.window.showErrorMessage('Open a Trino SQL query editor before running a query.');
@@ -517,16 +564,30 @@ async function runActiveSql(store: ConnectionStore, secrets: vscode.SecretStorag
     if (!connection) { return; }
     const selectedSql = editor.document.getText(editor.selection).trim();
     const sql = selectedSql || editor.document.getText();
+    // Anchor the timing above the statement that ran: the selection, or the
+    // first non-empty line when the whole editor is executed.
+    const line = selectedSql ? editor.selection.start.line : firstStatementLine(editor.document);
+    const started = Date.now();
     try {
         const result = await vscode.window.withProgress(
             { location: vscode.ProgressLocation.Window, title: `Executing on ${connection.name}…`, cancellable: true },
             (_, token) => new TrinoClient(secrets, connection).query(sql, token)
         );
+        status.record(editor.document.uri, { line, milliseconds: Date.now() - started, rows: result.rows.length });
         showSqlResults(result, connection);
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        status.record(editor.document.uri, { line, milliseconds: Date.now() - started, rows: 0, error: summarize(message) });
         vscode.window.showErrorMessage(`Trino query failed: ${message}`);
     }
+}
+
+function firstStatementLine(document: vscode.TextDocument): number {
+    for (let line = 0; line < document.lineCount; line++) {
+        const text = document.lineAt(line).text.trim();
+        if (text && !text.startsWith('--')) { return line; }
+    }
+    return 0;
 }
 
 function showSqlResults(result: TrinoQueryResult, connection: StoredConnection, title?: string, subtitle?: string): void {
