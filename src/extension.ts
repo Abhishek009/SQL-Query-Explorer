@@ -13,6 +13,8 @@ interface StoredConnection {
     user: string;
     catalog?: string;
     schema?: string;
+    /** Optional per-connection override of `trino.query.maxRows`. */
+    maxRows?: number;
 }
 
 interface TrinoPage {
@@ -26,6 +28,9 @@ interface TrinoPage {
 interface TrinoQueryResult {
     columns: string[];
     rows: unknown[][];
+    /** True when the row cap stopped the fetch before Trino ran out of rows. */
+    truncated?: boolean;
+    maxRows?: number;
 }
 
 /** Carries the untruncated server response alongside the short display message. */
@@ -144,11 +149,21 @@ class TrinoClient {
     public async query(statement: string, token?: vscode.CancellationToken): Promise<TrinoQueryResult> {
         const normalizedStatement = statement.trim().replace(/;+$/, '');
         if (!normalizedStatement) { throw new Error('Enter a SQL statement before running it.'); }
-        const page = await this.runStatement(normalizedStatement, token);
-        return { columns: (page.columns ?? []).map(column => column.name), rows: page.data ?? [] };
+        return this.runStatement(normalizedStatement, token);
     }
 
-    private async runStatement(statement: string, token?: vscode.CancellationToken): Promise<TrinoPage> {
+    /**
+     * The row cap for this connection: its own override when set, otherwise the
+     * global `trino.query.maxRows`. Bounds memory regardless of the statement.
+     */
+    public maxRows(): number {
+        const perConnection = Number(this.connection.maxRows);
+        if (Number.isFinite(perConnection) && perConnection > 0) { return Math.trunc(perConnection); }
+        const configured = Number(vscode.workspace.getConfiguration('trino').get('query.maxRows'));
+        return Number.isFinite(configured) && configured > 0 ? Math.trunc(configured) : 10_000;
+    }
+
+    private async runStatement(statement: string, token?: vscode.CancellationToken): Promise<TrinoQueryResult> {
         const { url: rawUrl, user, catalog, schema } = this.connection;
         if (!rawUrl || !user) { throw new Error('Configure the Trino URL and user before connecting.'); }
         const baseUrl = httpBaseUrl(rawUrl);
@@ -173,7 +188,16 @@ class TrinoClient {
         let page = await this.readPage(response);
         const rows = [...(page.data ?? [])];
         let columns = page.columns;
+        const maxRows = this.maxRows();
+        let truncated = false;
         while (page.nextUri && !page.error) {
+            if (rows.length >= maxRows) {
+                // Stop pulling pages and tell the coordinator to abandon the query,
+                // so it stops producing results nobody is going to read.
+                truncated = true;
+                await this.cancelQuery(page.nextUri, headers);
+                break;
+            }
             response = await this.request(page.nextUri, { method: 'GET', headers, signal: token });
             page = await this.readPage(response);
             rows.push(...(page.data ?? []));
@@ -185,7 +209,17 @@ class TrinoClient {
                 JSON.stringify(page.error, null, 2)
             );
         }
-        return { ...page, columns, data: rows };
+        if (rows.length > maxRows) {
+            rows.length = maxRows;
+            truncated = true;
+        }
+        return { columns: (columns ?? []).map(column => column.name), rows, truncated, maxRows };
+    }
+
+    /** Best effort: a failed cancellation must not fail the query we already have. */
+    private async cancelQuery(nextUri: string, headers: Record<string, string>): Promise<void> {
+        try { await fetch(nextUri, { method: 'DELETE', headers }); }
+        catch { /* the coordinator will time the query out on its own */ }
     }
 
     private async request(url: string, init: { method: string; headers: Record<string, string>; body?: string; signal?: vscode.CancellationToken }): Promise<Response> {
@@ -517,10 +551,13 @@ class SqlCompletionProvider implements vscode.CompletionItemProvider {
             const [catalog, schema, table] = qualifier;
             const columns = await this.lookup(
                 `${connection.id}:${catalog}.${schema}.${table}:columns`,
-                async () => (await client.columns(catalog, schema, table)).map(column => `${column.name} ${column.type}`)
+                async () => (await client.columns(catalog, schema, table)).map(column => `${column.name}\t${column.type}`)
             );
             return columns.map(entry => {
-                const [name, type] = entry.split(' ');
+                // Split on the first tab only: types such as "row(a bigint)" contain spaces.
+                const separator = entry.indexOf('\t');
+                const name = separator < 0 ? entry : entry.slice(0, separator);
+                const type = separator < 0 ? '' : entry.slice(separator + 1);
                 return completionItem(name, vscode.CompletionItemKind.Field, type || 'column');
             });
         } catch {
@@ -1047,7 +1084,8 @@ async function showConnectionWindow(
         sslEnabled: current.sslEnabled,
         user: existing?.user ?? '',
         catalog: existing?.catalog ?? '',
-        schema: existing?.schema ?? ''
+        schema: existing?.schema ?? '',
+        maxRows: existing?.maxRows ? String(existing.maxRows) : ''
     }, Boolean(existing), hasPassword);
 
     panel.webview.onDidReceiveMessage(async (message: unknown) => {
@@ -1066,7 +1104,8 @@ async function showConnectionWindow(
             url,
             user: request.user.trim(),
             catalog: request.catalog.trim() || undefined,
-            schema: request.schema.trim() || undefined
+            schema: request.schema.trim() || undefined,
+            maxRows: parseMaxRows(request.maxRows)
         });
         if (request.clearPassword) { await context.secrets.delete(passwordKey(id)); }
         else if (request.password) { await context.secrets.store(passwordKey(id), request.password); }
@@ -1140,16 +1179,21 @@ function sqlResultsHtml(webview: vscode.Webview, state: ResultsState): string {
         ['User', connection.user],
         ['Executed', new Date(state.executedAt).toLocaleString()],
         ['Duration', formatDuration(state.milliseconds)],
-        ['Rows fetched', fetched.toLocaleString()],
+        ['Rows fetched', `${fetched.toLocaleString()}${result.truncated ? ` (capped at ${(result.maxRows ?? fetched).toLocaleString()})` : ''}`],
         ['Rows shown', `${displayedRows.length.toLocaleString()} (limit ${limit.toLocaleString()})`],
         ['Columns', String(result.columns.length)],
         ['Sorted by', state.sort ? `${result.columns[state.sort.column]} ${state.sort.direction === 'asc' ? 'ascending' : 'descending'}` : 'none']
     ].map(([label, value]) => `<dt>${escape(label)}</dt><dd>${escape(value)}</dd>`).join('');
     const infoPanel = `<div id="info" class="info" hidden><dl>${info}</dl>${state.sql ? `<div class="sqlwrap"><div class="sqllabel">Statement</div><pre>${escape(state.sql)}</pre></div>` : ''}</div>`;
-    const toolbar = `<div class="bar"><span class="note"><b>${escape(connection.name)}</b> — ${note} · ${formatDuration(state.milliseconds)}</span><span class="spacer"></span><label for="limit">Limit</label><input id="limit" type="number" min="1" max="10000" step="50" value="${limit}" title="Maximum rows to display"><button id="info-toggle" class="ghost" title="Show query details">Info</button><button id="csv" title="Export displayed rows as CSV">CSV</button><button id="tsv" title="Export displayed rows as TSV">TSV</button></div>${infoPanel}`;
+    const capBanner = result.truncated
+        ? `<div class="banner">Stopped at the ${(result.maxRows ?? fetched).toLocaleString()} row cap — the query had more rows. Raise <code>trino.query.maxRows</code>, or set a per-connection limit, to fetch more.</div>`
+        : '';
+    const toolbar = `<div class="bar"><span class="note"><b>${escape(connection.name)}</b> — ${note} · ${formatDuration(state.milliseconds)}</span><span class="spacer"></span><label for="limit">Limit</label><input id="limit" type="number" min="1" max="10000" step="50" value="${limit}" title="Maximum rows to display"><button id="info-toggle" class="ghost" title="Show query details">Info</button><button id="csv" title="Export displayed rows as CSV">CSV</button><button id="tsv" title="Export displayed rows as TSV">TSV</button></div>${capBanner}${infoPanel}`;
     return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>html,body{height:100%}body{display:flex;flex-direction:column;color:var(--vscode-foreground);font-family:var(--vscode-font-family);margin:0;padding:8px 12px;box-sizing:border-box;overflow:hidden}.bar{flex:0 0 auto;display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap}.spacer{flex:1 1 auto}.note{color:var(--vscode-descriptionForeground);font-size:.9em}label{font-size:.9em;color:var(--vscode-descriptionForeground)}input{width:74px;padding:3px 6px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,rgba(128,128,128,.55));border-radius:2px}button{padding:3px 10px;color:var(--vscode-button-foreground);background:var(--vscode-button-background);border:0;border-radius:2px;cursor:pointer}button:hover{background:var(--vscode-button-hoverBackground)}
 button.ghost{background:transparent;color:var(--vscode-foreground);border:1px solid var(--vscode-panel-border,rgba(128,128,128,.45))}
 button.ghost:hover{background:var(--vscode-toolbar-hoverBackground,rgba(128,128,128,.18))}
+.banner{flex:0 0 auto;margin:0 0 8px;padding:6px 10px;border-radius:3px;font-size:.9em;color:var(--vscode-inputValidation-warningForeground,var(--vscode-foreground));background:var(--vscode-inputValidation-warningBackground,rgba(190,145,23,.18));border:1px solid var(--vscode-inputValidation-warningBorder,rgba(190,145,23,.6))}
+.banner code{background:var(--vscode-textCodeBlock-background,rgba(128,128,128,.18));padding:0 4px;border-radius:2px}
 .info{flex:0 0 auto;margin:0 0 8px;padding:10px 12px;border:1px solid var(--vscode-panel-border,rgba(128,128,128,.35));border-radius:4px;background:var(--vscode-textBlockQuote-background,rgba(128,128,128,.07));max-height:38%;overflow:auto}
 .info dl{display:grid;grid-template-columns:auto 1fr;gap:3px 14px;margin:0;font-size:.9em}
 .info dt{color:var(--vscode-descriptionForeground);white-space:nowrap}
@@ -1187,6 +1231,7 @@ interface ConnectionFormData {
     user: string;
     catalog: string;
     schema: string;
+    maxRows: string;
 }
 
 interface ConnectionMessage extends ConnectionFormData {
@@ -1217,6 +1262,12 @@ function expandPastedUrl(message: ConnectionMessage): ConnectionMessage {
         catalog: message.catalog.trim() || parsed.catalog,
         schema: message.schema.trim() || parsed.schema
     };
+}
+
+/** Blank means "use the global cap", so an empty field stores nothing. */
+function parseMaxRows(value: string): number | undefined {
+    const parsed = Number(value.trim());
+    return value.trim() && Number.isFinite(parsed) && parsed > 0 ? Math.trunc(parsed) : undefined;
 }
 
 function validateConnection(value: ConnectionMessage): string | undefined {
@@ -1309,7 +1360,7 @@ function connectionFormHtml(webview: vscode.Webview, values: ConnectionFormData,
     const escape = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
     const passwordHint = hasPassword ? 'Leave blank to keep the saved password' : 'Optional';
     const forgetRow = hasPassword ? '<label class="check"><input id="clearPassword" type="checkbox"> Forget saved password</label>' : '<input id="clearPassword" type="checkbox" hidden>';
-    return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Trino Connection</title><style>body{color:var(--vscode-foreground);font-family:var(--vscode-font-family);max-width:680px;margin:32px auto;padding:0 24px}h1{font-size:1.5em}.grid{display:grid;grid-template-columns:2fr 1fr;gap:14px}label{display:block;margin:14px 0 6px;font-weight:600}input{box-sizing:border-box;width:100%;padding:7px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,rgba(128,128,128,.55));border-radius:2px}input:focus{outline:1px solid var(--vscode-focusBorder,rgba(128,128,128,.9));outline-offset:-1px;border-color:var(--vscode-focusBorder,rgba(128,128,128,.9))}.check{display:flex;align-items:center;gap:8px;font-weight:normal}.check input{width:auto}button{margin:22px 8px 0 0;padding:8px 14px;color:var(--vscode-button-foreground);background:var(--vscode-button-background);border:0}button.secondary{background:var(--vscode-button-secondaryBackground)}#error{min-height:20px;color:var(--vscode-errorForeground);margin-top:12px}code{background:var(--vscode-textCodeBlock-background);padding:1px 4px}</style></head><body><h1>${isEdit ? 'Edit Trino connection' : 'New Trino connection'}</h1><p>Enter the host and port of your Trino coordinator. <em>Optional:</em> paste a full <code>http(s)://</code> or <code>jdbc:trino://</code> URL into Host to fill in the fields automatically.</p><form id="connection"><label for="name">Connection name</label><input id="name" value="${escape(values.name)}" placeholder="Development Trino"><div class="grid"><div><label for="host">Host</label><input id="host" value="${escape(values.host)}" placeholder="trino.example.com" required></div><div><label for="port">Port</label><input id="port" type="number" min="1" max="65535" value="${escape(values.port)}" required></div></div><label class="check"><input id="sslEnabled" type="checkbox" ${values.sslEnabled ? 'checked' : ''}> Enable SSL / HTTPS</label><label for="user">User</label><input id="user" value="${escape(values.user)}" required><label for="password">Password</label><input id="password" type="password" autocomplete="new-password" placeholder="${passwordHint}">${forgetRow}<label for="catalog">Default catalog (optional)</label><input id="catalog" value="${escape(values.catalog)}"><label for="schema">Default schema (optional)</label><input id="schema" value="${escape(values.schema)}"><div id="error" role="alert"></div><button type="submit" data-connect="true">Save &amp; Connect</button><button type="submit" class="secondary" data-connect="false">Save</button></form><script nonce="${nonce}">const vscode=acquireVsCodeApi();let connect=true;document.querySelectorAll('button[type=submit]').forEach(b=>b.addEventListener('click',()=>connect=b.dataset.connect==='true'));document.getElementById('connection').addEventListener('submit',e=>{e.preventDefault();const byId=id=>document.getElementById(id);vscode.postMessage({type:'save',name:byId('name').value,host:byId('host').value,port:byId('port').value,sslEnabled:byId('sslEnabled').checked,user:byId('user').value,password:byId('password').value,clearPassword:byId('clearPassword').checked,catalog:byId('catalog').value,schema:byId('schema').value,connect});});window.addEventListener('message',e=>{if(e.data.type==='error')document.getElementById('error').textContent=e.data.message;});</script></body></html>`;
+    return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Trino Connection</title><style>body{color:var(--vscode-foreground);font-family:var(--vscode-font-family);max-width:680px;margin:32px auto;padding:0 24px}h1{font-size:1.5em}.grid{display:grid;grid-template-columns:2fr 1fr;gap:14px}label{display:block;margin:14px 0 6px;font-weight:600}input{box-sizing:border-box;width:100%;padding:7px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,rgba(128,128,128,.55));border-radius:2px}input:focus{outline:1px solid var(--vscode-focusBorder,rgba(128,128,128,.9));outline-offset:-1px;border-color:var(--vscode-focusBorder,rgba(128,128,128,.9))}.check{display:flex;align-items:center;gap:8px;font-weight:normal}.check input{width:auto}button{margin:22px 8px 0 0;padding:8px 14px;color:var(--vscode-button-foreground);background:var(--vscode-button-background);border:0}button.secondary{background:var(--vscode-button-secondaryBackground)}#error{min-height:20px;color:var(--vscode-errorForeground);margin-top:12px}code{background:var(--vscode-textCodeBlock-background);padding:1px 4px}</style></head><body><h1>${isEdit ? 'Edit Trino connection' : 'New Trino connection'}</h1><p>Enter the host and port of your Trino coordinator.</p><form id="connection"><label for="name">Connection name</label><input id="name" value="${escape(values.name)}" placeholder="Development Trino"><div class="grid"><div><label for="host">Host</label><input id="host" value="${escape(values.host)}" placeholder="trino.example.com" required></div><div><label for="port">Port</label><input id="port" type="number" min="1" max="65535" value="${escape(values.port)}" required></div></div><label class="check"><input id="sslEnabled" type="checkbox" ${values.sslEnabled ? 'checked' : ''}> Enable SSL / HTTPS</label><label for="user">User</label><input id="user" value="${escape(values.user)}" required><label for="password">Password</label><input id="password" type="password" autocomplete="new-password" placeholder="${passwordHint}">${forgetRow}<label for="catalog">Default catalog (optional)</label><input id="catalog" value="${escape(values.catalog)}"><label for="schema">Default schema (optional)</label><input id="schema" value="${escape(values.schema)}"><label for="maxRows">Maximum rows to fetch (optional)</label><input id="maxRows" type="number" min="1" max="1000000" value="${escape(values.maxRows)}" placeholder="Leave blank to use the global trino.query.maxRows"><div id="error" role="alert"></div><button type="submit" data-connect="true">Save &amp; Connect</button><button type="submit" class="secondary" data-connect="false">Save</button></form><script nonce="${nonce}">const vscode=acquireVsCodeApi();let connect=true;document.querySelectorAll('button[type=submit]').forEach(b=>b.addEventListener('click',()=>connect=b.dataset.connect==='true'));document.getElementById('connection').addEventListener('submit',e=>{e.preventDefault();const byId=id=>document.getElementById(id);vscode.postMessage({type:'save',name:byId('name').value,host:byId('host').value,port:byId('port').value,sslEnabled:byId('sslEnabled').checked,user:byId('user').value,password:byId('password').value,clearPassword:byId('clearPassword').checked,catalog:byId('catalog').value,schema:byId('schema').value,maxRows:byId('maxRows').value,connect});});window.addEventListener('message',e=>{if(e.data.type==='error')document.getElementById('error').textContent=e.data.message;});</script></body></html>`;
 }
 
 function showConnectionError(error: unknown): void {
