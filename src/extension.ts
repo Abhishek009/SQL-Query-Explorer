@@ -350,6 +350,8 @@ class ExplorerItem extends vscode.TreeItem {
         item.description = 'TABLE';
         item.iconPath = new vscode.ThemeIcon('list-flat');
         item.tooltip = `${catalog}.${schema}.${table}`;
+        // Opens on click or double-click, following workbench.list.openMode.
+        item.command = { command: 'trino.previewTable', title: 'Preview Table Data', arguments: [item] };
         return item;
     }
 
@@ -422,6 +424,9 @@ export function activate(context: vscode.ExtensionContext): void {
         const connection = store.get(store.activeId);
         await showConnectionWindow(context, store, provider, connection);
     });
+    register('trino.previewTable', async (item?: ExplorerItem) => {
+        await previewTable(store, context.secrets, item);
+    });
     register('trino.openQuery', async () => { await openSqlQueryEditor(store); });
     register('trino.runActiveSql', async () => { await runActiveSql(store, context.secrets); });
 }
@@ -448,6 +453,30 @@ async function resolveConnection(store: ConnectionStore): Promise<StoredConnecti
     const connection = await pickConnection(store, 'Select a Trino connection');
     if (connection) { await store.setActive(connection.id); }
     return connection;
+}
+
+/** Runs a bounded SELECT for the clicked table and shows it in the results grid. */
+async function previewTable(store: ConnectionStore, secrets: vscode.SecretStorage, item?: ExplorerItem): Promise<void> {
+    const connection = store.get(item?.connectionId);
+    if (!connection || !item?.catalog || !item.schema || !item.table) { return; }
+    const qualified = `${quoteIdentifier(item.catalog)}.${quoteIdentifier(item.schema)}.${quoteIdentifier(item.table)}`;
+    const limit = previewRowLimit();
+    try {
+        const result = await vscode.window.withProgress(
+            { location: vscode.ProgressLocation.Window, title: `Loading ${item.table}…`, cancellable: true },
+            (_, token) => new TrinoClient(secrets, connection).query(`SELECT * FROM ${qualified} LIMIT ${limit}`, token)
+        );
+        const shown = `${result.rows.length.toLocaleString()} row(s) from ${item.catalog}.${item.schema}.${item.table}`;
+        showSqlResults(result, connection, `${item.table} — ${connection.name}`, `${shown} (limit ${limit.toLocaleString()}).`);
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        vscode.window.showErrorMessage(`Could not preview ${item.table}: ${message}`);
+    }
+}
+
+function previewRowLimit(): number {
+    const configured = vscode.workspace.getConfiguration('trino').get<number>('preview.rowLimit') ?? 100;
+    return Math.min(Math.max(Math.trunc(configured) || 100, 1), 10_000);
 }
 
 async function openSqlQueryEditor(store: ConnectionStore): Promise<void> {
@@ -482,9 +511,14 @@ async function runActiveSql(store: ConnectionStore, secrets: vscode.SecretStorag
     }
 }
 
-function showSqlResults(result: TrinoQueryResult, connection: StoredConnection): void {
-    const panel = vscode.window.createWebviewPanel('trinoQueryResults', `Trino Results — ${connection.name}`, vscode.ViewColumn.Beside, { enableScripts: false });
-    panel.webview.html = sqlResultsHtml(panel.webview, result, connection);
+function showSqlResults(result: TrinoQueryResult, connection: StoredConnection, title?: string, subtitle?: string): void {
+    const panel = vscode.window.createWebviewPanel(
+        'trinoQueryResults',
+        title ?? `Trino Results — ${connection.name}`,
+        vscode.ViewColumn.Beside,
+        { enableScripts: false }
+    );
+    panel.webview.html = sqlResultsHtml(panel.webview, result, connection, subtitle);
 }
 
 async function showConnectionWindow(
@@ -545,13 +579,15 @@ async function showConnectionWindow(
     }, undefined, context.subscriptions);
 }
 
-function sqlResultsHtml(webview: vscode.Webview, result: TrinoQueryResult, connection: StoredConnection): string {
+function sqlResultsHtml(webview: vscode.Webview, result: TrinoQueryResult, connection: StoredConnection, subtitle?: string): string {
     const displayedRows = result.rows.slice(0, 1_000);
     const escape = (value: unknown) => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     const format = (value: unknown) => value === null ? 'NULL' : typeof value === 'object' ? JSON.stringify(value) : String(value);
     const headers = result.columns.map(column => `<th>${escape(column)}</th>`).join('');
     const rows = displayedRows.map(row => `<tr>${result.columns.map((_, index) => `<td>${escape(format(row[index]))}</td>`).join('')}</tr>`).join('');
-    const note = result.rows.length > displayedRows.length ? `Showing the first ${displayedRows.length.toLocaleString()} of ${result.rows.length.toLocaleString()} rows.` : `${result.rows.length.toLocaleString()} row(s) returned.`;
+    const note = subtitle ?? (result.rows.length > displayedRows.length
+        ? `Showing the first ${displayedRows.length.toLocaleString()} of ${result.rows.length.toLocaleString()} rows.`
+        : `${result.rows.length.toLocaleString()} row(s) returned.`);
     const table = result.columns.length ? `<div class="results"><table><thead><tr>${headers}</tr></thead><tbody>${rows}</tbody></table></div>` : '<p>Statement completed. No rows returned.</p>';
     return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline';"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>body{color:var(--vscode-foreground);font-family:var(--vscode-font-family);margin:0;padding:18px;overflow:hidden}h1{font-size:1.25em;margin:0 0 6px}.note{margin:0 0 14px;color:var(--vscode-descriptionForeground)}.results{height:calc(100vh - 108px);overflow:auto;border:1px solid var(--vscode-panel-border)}table{border-collapse:collapse;width:max-content;min-width:100%}th,td{padding:6px 10px;border-right:1px solid var(--vscode-panel-border);border-bottom:1px solid var(--vscode-panel-border);text-align:left;vertical-align:top;white-space:pre-wrap}th{position:sticky;top:0;background:var(--vscode-editor-background);font-weight:600}td{max-width:420px}</style></head><body><h1>Trino Query Results</h1><p class="note">${escape(connection.name)} — ${note}</p>${table}</body></html>`;
 }

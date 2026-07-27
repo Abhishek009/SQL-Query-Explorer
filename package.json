@@ -60,6 +60,11 @@
         "title": "Trino: Configure Connection"
       },
       {
+        "command": "trino.previewTable",
+        "title": "Trino: Preview Table Data",
+        "icon": "$(table)"
+      },
+      {
         "command": "trino.openQuery",
         "title": "Trino: New SQL Query",
         "icon": "$(new-file)"
@@ -118,6 +123,13 @@
             }
           }
         },
+        "trino.preview.rowLimit": {
+          "type": "number",
+          "default": 100,
+          "minimum": 1,
+          "maximum": 10000,
+          "description": "Number of rows fetched when previewing a table from the Connections view."
+        },
         "trino.connection.name": {
           "type": "string",
           "default": "Trino Connection",
@@ -173,6 +185,10 @@
         {
           "command": "trino.setActiveConnection",
           "when": "false"
+        },
+        {
+          "command": "trino.previewTable",
+          "when": "false"
         }
       ],
       "view/title": [
@@ -193,6 +209,16 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "trino.previewTable",
+          "when": "view == trinoCatalogs && viewItem == trino.table",
+          "group": "inline@1"
+        },
+        {
+          "command": "trino.previewTable",
+          "when": "view == trinoCatalogs && viewItem == trino.table",
+          "group": "1_table@1"
+        },
         {
           "command": "trino.refreshCatalogs",
           "when": "view == trinoCatalogs && viewItem =~ /^trino\\.connection/",
