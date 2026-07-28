@@ -775,6 +775,42 @@ class TrinoExplorerProvider implements vscode.TreeDataProvider<ExplorerItem> {
     }
 }
 
+/**
+ * Lets tree nodes be dragged into a SQL editor. Setting `text/plain` on the
+ * transfer is what makes the editor accept the drop and insert the name.
+ */
+class ExplorerDragController implements vscode.TreeDragAndDropController<ExplorerItem> {
+    public readonly dragMimeTypes = ['text/plain'];
+    public readonly dropMimeTypes: string[] = [];
+
+    public handleDrag(source: readonly ExplorerItem[], data: vscode.DataTransfer): void {
+        const text = source.map(qualifiedName).filter(Boolean).join(', ');
+        if (text) { data.set('text/plain', new vscode.DataTransferItem(text)); }
+    }
+
+    public handleDrop(): void { /* the tree accepts no drops */ }
+}
+
+/** The SQL name a node stands for, quoting only identifiers that need it. */
+function qualifiedName(item: ExplorerItem): string {
+    const part = (name: string) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? name : quoteIdentifier(name);
+    switch (item.kind) {
+        case 'catalog':
+            return item.catalog ? part(item.catalog) : '';
+        case 'schema':
+            return item.catalog && item.schema ? `${part(item.catalog)}.${part(item.schema)}` : '';
+        case 'table':
+            return item.catalog && item.schema && item.table
+                ? `${part(item.catalog)}.${part(item.schema)}.${part(item.table)}`
+                : '';
+        case 'column':
+            // A bare column name is what you want inside a SELECT list.
+            return part(String(item.label ?? ''));
+        default:
+            return '';
+    }
+}
+
 class ExplorerItem extends vscode.TreeItem {
     private constructor(
         label: string,
@@ -856,7 +892,12 @@ export function activate(context: vscode.ExtensionContext): void {
         status,
         vscode.languages.registerCompletionItemProvider({ language: 'sql' }, completions, '.'),
         store.onDidChange(() => completions.clear()),
-        vscode.window.registerTreeDataProvider('trinoCatalogs', provider),
+        vscode.window.createTreeView('trinoCatalogs', {
+            treeDataProvider: provider,
+            dragAndDropController: new ExplorerDragController(),
+            canSelectMany: true,
+            showCollapseAll: true
+        }),
         vscode.window.registerWebviewViewProvider(ResultsViewProvider.viewId, results, {
             webviewOptions: { retainContextWhenHidden: true }
         }),
