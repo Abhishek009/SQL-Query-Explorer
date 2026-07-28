@@ -1,19 +1,19 @@
 # Trino Explorer
 
-A VS Code extension that connects to a [Trino](https://trino.io) coordinator, lets you browse its catalogs, schemas, and tables from the Activity Bar, and run SQL against it without leaving the editor.
+A VS Code extension that connects to one or more [Trino](https://trino.io) coordinators, lets you browse catalogs, schemas, tables, and columns from the Activity Bar, and run SQL against them without leaving the editor.
 
 ## Features
 
-### Connection management
-- **Configure Connection** window for host, port, SSL/HTTPS, user, and optional password, catalog, and schema.
+### Connections
+- **Manage several coordinators at once** — dev, staging, and production sit side by side in the **Connections** view. Add one with the **+** button, then edit, remove, or refresh each from its context menu.
+- One connection is **active** for queries at a time; right-click → **Use Connection for Queries** to switch.
 - **Paste a JDBC connection string or a full URL into the Host field** and the rest of the form fills itself in — see [Connection URL formats](#connection-url-formats).
 - Passwords are stored in **VS Code Secret Storage**, never in `settings.json`.
-- The coordinator URL is built from the host, port, and SSL choice; all metadata and query traffic goes through Trino's `/v1/statement` endpoint.
-- Connection defaults are also editable under the `trino.connection` settings section.
+- All metadata and query traffic goes through Trino's `/v1/statement` endpoint.
 
 #### Connection URL formats
 
-The Host field and the `trino.connection.url` setting both accept a plain host name, an HTTP(S) URL, or a Trino JDBC connection string. JDBC URLs are translated to the equivalent REST endpoint:
+The Host field accepts a plain host name, an HTTP(S) URL, or a Trino JDBC connection string. JDBC URLs are translated to the equivalent REST endpoint:
 
 | You enter | Resolves to |
 | --- | --- |
@@ -23,42 +23,61 @@ The Host field and the `trino.connection.url` setting both accept a plain host n
 | `jdbc:trino://localhost:8080/tpch` | `http://localhost:8080`, catalog `tpch` |
 
 Details:
-- `SSL=true` selects HTTPS, as does port `443`. Parameter names are matched case-insensitively.
-- A `/catalog/schema` path and a `user=` parameter populate those fields; anything you have already typed into the form takes precedence.
+- `SSL=true` selects HTTPS, as do ports `443` and `8443`. Parameter names are matched case-insensitively.
+- A `/catalog/schema` path and a `user=` parameter populate those fields; anything already typed into the form takes precedence, and anything the URL omits keeps the value you chose.
 - `jdbc:presto://` is accepted for older deployments.
 - A password in the URL is **ignored by design**, so it never lands in `settings.json` in clear text — enter it in the form instead, where it goes to Secret Storage.
 - JDBC-only parameters such as `SSLVerification`, `KerberosRemoteServiceName`, and `extraCredentials` are parsed but not yet applied.
 
-### Catalog explorer
-- Dedicated **Trino** container in the Activity Bar with a **Catalogs** tree view.
-- Lazy hierarchy of **connection → catalog → schema → table** — children are fetched from Trino only when you expand a node.
-- **Refresh** action to reload catalogs after changes on the coordinator.
+### Explorer
+- Lazy hierarchy of **connection → catalog → schema → table → column**, fetched only when you expand a node.
+- **Columns show their data type** beside the name, with comments and the fully-qualified name on hover.
+- **Double-click a table** to preview its rows, or use the inline preview icon / context menu for a single click.
 
 ### SQL editor and execution
-- **Trino: New SQL Query** opens a native VS Code SQL editor, so normal editing features, syntax highlighting, and GitHub Copilot all work.
+- **Trino: New SQL Query** opens a native VS Code SQL editor, so normal editing, syntax highlighting, and GitHub Copilot all work.
 - **Trino: Run SQL Query** from the editor title bar or `Cmd+Enter` / `Ctrl+Enter`. If text is selected only the selection runs; otherwise the whole editor runs.
-- Results render as a table in a separate **Trino Query Results** panel.
-- Long-running statements show a cancellable progress indicator and abort the underlying HTTP request when cancelled.
+- **Autocomplete from live metadata** — typing `tpch.` suggests schemas, `tpch.sf1.` suggests tables, and `tpch.sf1.customer.` suggests columns with their types. Results are cached briefly and refresh with the connection.
+- **Execution feedback in the editor**: a timing line above the statement (`✓ 619ms · 1,500 row(s)`) plus a green tick or red cross in the gutter.
+- Long-running statements show a cancellable progress indicator and abort the underlying request when cancelled.
+
+### Results panel
+Results open in a **Trino Results** tab beside Terminal and Output, not in an editor tab.
+
+- **Sortable columns** — click a header to cycle ascending → descending → unsorted. Numbers sort numerically, text case-insensitively, and NULLs always sort last.
+- **Resizable columns** — drag a header edge; double-click it to reset.
+- **Row limit box** — defaults to 100. For table previews, raising it re-queries Trino for more rows.
+- **Export to CSV or TSV**, honouring the current sort and limit. CSV uses RFC 4180 quoting; TSV collapses tabs and newlines.
+- **Info** shows the connection, user, timestamp, duration, row counts, column count, sort order, and the statement that ran.
+- Readable grid: sticky header, row numbers, zebra striping, right-aligned numerics, and distinct NULL styling.
+- **Errors appear in the same panel** with the full server response — Trino's error JSON including `errorName` and `errorLocation` — not a truncated notification.
+
+### Row cap
+Queries without a `LIMIT` could otherwise pull an entire table into memory. The extension stops fetching at `trino.query.maxRows` (default 10,000), **cancels the query on the coordinator**, and shows a banner so truncation is never silent. Any connection can override the cap in its own settings.
 
 ### Commands
 
 | Command | Description |
 | --- | --- |
-| `Trino: Connect` | Connect using the saved configuration and load catalogs. |
-| `Trino: Configure Connection` | Open the connection window to edit connection details. |
-| `Trino: New SQL Query` | Open a new SQL editor bound to the connection. |
+| `Trino: Add Connection` | Create a new coordinator connection. |
+| `Trino: Edit Connection` | Change an existing connection's details. |
+| `Trino: Remove Connection` | Delete a connection and its saved password. |
+| `Trino: Use Connection for Queries` | Make a connection the active one for SQL. |
+| `Trino: Connect` | Connect and load catalogs. |
+| `Trino: New SQL Query` | Open a new SQL editor. |
 | `Trino: Run SQL Query` | Execute the selection, or the whole editor if nothing is selected. |
-| `Trino: Refresh Catalogs` | Reload the catalog tree. |
+| `Trino: Preview Table Data` | Run a bounded `SELECT` against the selected table. |
+| `Trino: Refresh Catalogs` | Reload the tree and clear cached metadata. |
 
 ### Settings
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `trino.connection.name` | `Trino Connection` | Display name for the connection in the Explorer. |
-| `trino.connection.url` | `http://localhost:8080` | Coordinator URL. Accepts `http(s)://host:port` or a JDBC string such as `jdbc:trino://host:port/catalog/schema?SSL=true`. |
-| `trino.connection.user` | _(empty)_ | User sent in the `X-Trino-User` header. |
-| `trino.connection.catalog` | _(empty)_ | Optional catalog used for the session. |
-| `trino.connection.schema` | _(empty)_ | Optional schema used for the session. |
+| `trino.connections` | `[]` | Saved connections. Managed by the Connections view; passwords are kept in Secret Storage, not here. |
+| `trino.query.maxRows` | `10000` | Hard cap on rows fetched for any statement. A connection can override it. |
+| `trino.preview.rowLimit` | `100` | Rows shown in the results grid, and fetched for a table preview. |
+
+The older `trino.connection.*` settings are deprecated. Existing values are migrated into `trino.connections` automatically on first run.
 
 ## Getting started
 
@@ -68,23 +87,18 @@ Details:
    npm run compile
    ```
    Then open the project in VS Code and press `F5` to launch the Extension Development Host.
-2. Select the Trino icon in the Activity Bar, then choose **Configure Connection**.
-3. Enter the host, port, SSL/HTTPS choice, user, and any optional password, catalog, or schema. You can also paste a full `jdbc:trino://…` or `http(s)://…` URL into **Host** and let the other fields populate themselves.
-4. Select **Save & Connect** (or use **Refresh** in the Catalogs view).
-5. Expand a catalog to browse its schemas and tables.
+2. Select the Trino icon in the Activity Bar, then **+** (or **Add Connection**).
+3. Enter the host, port, SSL/HTTPS choice, and user, plus an optional password. You can also paste a full `jdbc:trino://…` or `http(s)://…` URL into **Host** and let the other fields populate themselves.
+4. Select **Save & Connect**.
+5. Expand a catalog to browse schemas, tables, and columns. Double-click a table to preview its data.
 6. Run **Trino: New SQL Query**, write a statement, and execute it with `Cmd+Enter` / `Ctrl+Enter`.
 
 ## Roadmap
 
-Planned additions, roughly in the order they are being worked on.
-
-### Next up
-- **Multiple saved connections** — manage several coordinators (dev / stage / prod), switch between them in the Explorer, and see them side by side in the tree instead of the single connection supported today.
-- **Export query results** — save or copy the results grid as CSV or JSON.
-- **Table preview and DDL** — right-click a table to inspect column names and types, preview rows with a bounded `SELECT`, and generate `SHOW CREATE TABLE`.
-
-### Later
-- **SQL autocomplete from live metadata** — IntelliSense for catalog, schema, table, and column names driven by the connected coordinator.
+- **Query history and saved queries** — persist previously run statements, re-run them, and bookmark favourites.
+- **`SHOW CREATE TABLE`** — generate DDL from the explorer.
+- **Enterprise authentication** — OAuth2, JWT, and Kerberos beyond the current user and password.
+- **Natural ordering for text sorts** — restore `item9` before `item10` for text columns without the performance cost.
 
 Suggestions and issues are welcome at the [project repository](https://github.com/Abhishek009/trino-plugin).
 
