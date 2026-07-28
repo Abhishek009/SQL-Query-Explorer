@@ -3,7 +3,7 @@
   "displayName": "Trino Explorer",
   "publisher": "big-tech-talk",
   "description": "Connect to Trino and browse available catalogs.",
-  "version": "0.1.1",
+  "version": "1.0.0",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -196,14 +196,18 @@
       "trino": [
         {
           "id": "trinoCatalogs",
-          "name": "Connections"
+          "name": "Connections",
+          "icon": "resources/trino.svg",
+          "contextualTitle": "Trino"
         }
       ],
       "trinoResults": [
         {
           "id": "trinoResultsView",
           "name": "Results",
-          "type": "webview"
+          "type": "webview",
+          "icon": "resources/trino.svg",
+          "contextualTitle": "Trino Results"
         }
       ]
     },

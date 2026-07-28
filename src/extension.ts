@@ -1421,7 +1421,7 @@ button:focus-visible{outline:2px solid var(--vscode-focusBorder,#2f7ce0);outline
     <div class="badge">T</div>
     <div>
       <h1>${isEdit ? 'Edit connection' : 'New Trino connection'}</h1>
-      <p class="sub">Point the explorer at a Trino coordinator. You can paste a full <code>http(s)://</code> or <code>jdbc:trino://</code> URL into Host and the rest fills itself in.</p>
+      <p class="sub">Point the explorer at a Trino coordinator. </p>
     </div>
   </div>
   <div id="error" class="alert" role="alert"></div>
