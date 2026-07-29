@@ -85,6 +85,11 @@
         "command": "trino.refreshCatalogs",
         "title": "Trino: Refresh Catalogs",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "trino.cancelQuery",
+        "title": "Trino: Cancel Running Query",
+        "icon": "$(stop-circle)"
       }
     ],
     "configuration": {

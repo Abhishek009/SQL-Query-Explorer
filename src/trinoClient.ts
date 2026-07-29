@@ -3,6 +3,7 @@ import { StoredConnection, TrinoColumn, TrinoQueryResult, TrinoRequestError } fr
 import { passwordKey } from './connectionStore';
 import { firstColumn, quoteIdentifier, summarize } from './util';
 import { httpBaseUrl } from './urls';
+import { RunningQueryRegistry } from './runningQueries';
 
 export interface TrinoPage {
     id?: string;
@@ -13,7 +14,12 @@ export interface TrinoPage {
 }
 
 export class TrinoClient {
-    public constructor(private readonly secrets: vscode.SecretStorage, private readonly connection: StoredConnection) {}
+    public constructor(
+        private readonly secrets: vscode.SecretStorage,
+        private readonly connection: StoredConnection,
+        /** Set for user-initiated statements so they appear in the status bar. */
+        private readonly registry?: RunningQueryRegistry
+    ) {}
 
     public async catalogs(token?: vscode.CancellationToken): Promise<string[]> {
         return firstColumn(await this.query('SHOW CATALOGS', token));
@@ -75,38 +81,59 @@ export class TrinoClient {
             headers.Authorization = `Basic ${Buffer.from(`${user}:${password}`).toString('base64')}`;
         }
 
-        let response = await this.request(`${baseUrl}/v1/statement`, {
-            method: 'POST', headers, body: statement, signal: token
-        });
-        let page = await this.readPage(response);
-        const rows = [...(page.data ?? [])];
-        let columns = page.columns;
-        const maxRows = this.maxRows();
-        let truncated = false;
-        while (page.nextUri && !page.error) {
-            if (rows.length >= maxRows) {
-                // Stop pulling pages and tell the coordinator to abandon the query,
-                // so it stops producing results nobody is going to read.
-                truncated = true;
-                await this.cancelQuery(page.nextUri, headers);
-                break;
+        // One controller for the whole statement: cancelling has to stop the page
+        // currently in flight as well as the ones that would follow it.
+        const abort = new AbortController();
+        const live: { nextUri?: string } = {};
+        const entry = this.registry?.add({
+            connectionName: this.connection.name,
+            sql: statement,
+            startedAt: Date.now(),
+            cancel: async () => {
+                abort.abort();
+                if (live.nextUri) { await this.cancelQuery(live.nextUri, headers); }
             }
-            response = await this.request(page.nextUri, { method: 'GET', headers, signal: token });
-            page = await this.readPage(response);
-            rows.push(...(page.data ?? []));
-            columns ??= page.columns;
+        });
+
+        try {
+            let response = await this.request(`${baseUrl}/v1/statement`, {
+                method: 'POST', headers, body: statement, signal: token, abort
+            });
+            let page = await this.readPage(response);
+            live.nextUri = page.nextUri;
+            if (entry) { this.registry?.setQueryId(entry.id, page.id); }
+            const rows = [...(page.data ?? [])];
+            let columns = page.columns;
+            const maxRows = this.maxRows();
+            let truncated = false;
+            while (page.nextUri && !page.error) {
+                if (rows.length >= maxRows) {
+                    // Stop pulling pages and tell the coordinator to abandon the query,
+                    // so it stops producing results nobody is going to read.
+                    truncated = true;
+                    await this.cancelQuery(page.nextUri, headers);
+                    break;
+                }
+                response = await this.request(page.nextUri, { method: 'GET', headers, signal: token, abort });
+                page = await this.readPage(response);
+                live.nextUri = page.nextUri;
+                rows.push(...(page.data ?? []));
+                columns ??= page.columns;
+            }
+            if (page.error) {
+                throw new TrinoRequestError(
+                    page.error.message || page.error.errorName || 'Trino returned an error.',
+                    JSON.stringify(page.error, null, 2)
+                );
+            }
+            if (rows.length > maxRows) {
+                rows.length = maxRows;
+                truncated = true;
+            }
+            return { columns: (columns ?? []).map(column => column.name), rows, truncated, maxRows };
+        } finally {
+            if (entry) { this.registry?.remove(entry.id); }
         }
-        if (page.error) {
-            throw new TrinoRequestError(
-                page.error.message || page.error.errorName || 'Trino returned an error.',
-                JSON.stringify(page.error, null, 2)
-            );
-        }
-        if (rows.length > maxRows) {
-            rows.length = maxRows;
-            truncated = true;
-        }
-        return { columns: (columns ?? []).map(column => column.name), rows, truncated, maxRows };
     }
 
     /** Best effort: a failed cancellation must not fail the query we already have. */
@@ -115,13 +142,13 @@ export class TrinoClient {
         catch { /* the coordinator will time the query out on its own */ }
     }
 
-    private async request(url: string, init: { method: string; headers: Record<string, string>; body?: string; signal?: vscode.CancellationToken }): Promise<Response> {
-        const controller = new AbortController();
+    private async request(url: string, init: { method: string; headers: Record<string, string>; body?: string; signal?: vscode.CancellationToken; abort?: AbortController }): Promise<Response> {
+        const controller = init.abort ?? new AbortController();
         const cancellation = init.signal?.onCancellationRequested(() => controller.abort());
         try {
             return await fetch(url, { method: init.method, headers: init.headers, body: init.body, signal: controller.signal });
         } catch (error) {
-            if (controller.signal.aborted) { throw new Error('Trino request was cancelled.'); }
+            if (controller.signal.aborted) { throw new Error('Trino query was cancelled.'); }
             throw error;
         } finally {
             cancellation?.dispose();

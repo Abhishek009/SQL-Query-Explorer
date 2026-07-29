@@ -6,6 +6,7 @@ import { TrinoClient } from './trinoClient';
 import { ExplorerItem, TrinoExplorerProvider } from './explorer';
 import { ResultsViewProvider } from './resultsView';
 import { QueryStatusProvider } from './queryStatus';
+import { RunningQueryRegistry } from './runningQueries';
 import { ConnectionMessage, connectionFormHtml, expandPastedUrl, isConnectionMessage, parseMaxRows, validateConnection } from './connectionForm';
 import { formatHost, parseConnectionUrl } from './urls';
 import { previewRowLimit, quoteIdentifier, showConnectionError, summarize } from './util';
@@ -50,13 +51,13 @@ export function isDoubleClick(key: string): boolean {
 }
 
 /** Runs a bounded SELECT for the clicked table and shows it in the results grid. */
-export async function previewTable(store: ConnectionStore, secrets: vscode.SecretStorage, results: ResultsViewProvider, item?: ExplorerItem, force = false): Promise<void> {
+export async function previewTable(store: ConnectionStore, secrets: vscode.SecretStorage, results: ResultsViewProvider, registry: RunningQueryRegistry, item?: ExplorerItem, force = false): Promise<void> {
     const connection = store.get(item?.connectionId);
     if (!connection || !item?.catalog || !item.schema || !item.table) { return; }
     if (!force && !isDoubleClick(`${connection.id}/${item.catalog}/${item.schema}/${item.table}`)) { return; }
     const qualified = `${quoteIdentifier(item.catalog)}.${quoteIdentifier(item.schema)}.${quoteIdentifier(item.table)}`;
     const limit = previewRowLimit();
-    const client = new TrinoClient(secrets, connection);
+    const client = new TrinoClient(secrets, connection, registry);
     const fetchRows = (rowLimit: number, token?: vscode.CancellationToken) =>
         client.query(`SELECT * FROM ${qualified} LIMIT ${rowLimit}`, token);
     const started = Date.now();
@@ -87,7 +88,7 @@ export async function openSqlQueryEditor(store: ConnectionStore): Promise<void> 
     await vscode.window.showTextDocument(document, { preview: false });
 }
 
-export async function runActiveSql(store: ConnectionStore, secrets: vscode.SecretStorage, status: QueryStatusProvider, results: ResultsViewProvider): Promise<void> {
+export async function runActiveSql(store: ConnectionStore, secrets: vscode.SecretStorage, status: QueryStatusProvider, results: ResultsViewProvider, registry: RunningQueryRegistry): Promise<void> {
     const editor = vscode.window.activeTextEditor;
     if (!editor || editor.document.languageId !== 'sql') {
         vscode.window.showErrorMessage('Open a Trino SQL query editor before running a query.');
@@ -104,7 +105,7 @@ export async function runActiveSql(store: ConnectionStore, secrets: vscode.Secre
     try {
         const result = await vscode.window.withProgress(
             { location: vscode.ProgressLocation.Window, title: `Executing on ${connection.name}…`, cancellable: true },
-            (_, token) => new TrinoClient(secrets, connection).query(sql, token)
+            (_, token) => new TrinoClient(secrets, connection, registry).query(sql, token)
         );
         const elapsed = Date.now() - started;
         status.record(editor.document.uri, { line, milliseconds: elapsed, rows: result.rows.length });

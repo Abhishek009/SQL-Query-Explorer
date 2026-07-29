@@ -6,6 +6,7 @@ import { QueryStatusProvider } from './queryStatus';
 import { SqlCompletionProvider } from './completion';
 import { openSqlQueryEditor, pickConnection, previewTable, resolveConnection, runActiveSql, showConnectionWindow } from './commands';
 import { showConnectionError } from './util';
+import { RunningQueryRegistry, RunningQueryStatus, cancelRunningQuery } from './runningQueries';
 
 export function activate(context: vscode.ExtensionContext): void {
     const store = new ConnectionStore(context);
@@ -13,10 +14,13 @@ export function activate(context: vscode.ExtensionContext): void {
     const status = new QueryStatusProvider(context);
     const results = new ResultsViewProvider();
     const completions = new SqlCompletionProvider(store, context.secrets);
+    const running = new RunningQueryRegistry();
     void store.migrateLegacyConnection();
 
     context.subscriptions.push(
         status,
+        running,
+        new RunningQueryStatus(running),
         vscode.languages.registerCompletionItemProvider({ language: 'sql' }, completions, '.'),
         store.onDidChange(() => completions.clear()),
         vscode.window.createTreeView('trinoCatalogs', {
@@ -86,13 +90,14 @@ export function activate(context: vscode.ExtensionContext): void {
         await showConnectionWindow(context, store, provider, connection);
     });
     register('trino.previewTable', async (item?: ExplorerItem) => {
-        await previewTable(store, context.secrets, results, item, true);
+        await previewTable(store, context.secrets, results, running, item, true);
     });
     register('trino.tableClicked', async (item?: ExplorerItem) => {
-        await previewTable(store, context.secrets, results, item);
+        await previewTable(store, context.secrets, results, running, item);
     });
     register('trino.openQuery', async () => { await openSqlQueryEditor(store); });
-    register('trino.runActiveSql', async () => { await runActiveSql(store, context.secrets, status, results); });
+    register('trino.runActiveSql', async () => { await runActiveSql(store, context.secrets, status, results, running); });
+    register('trino.cancelQuery', async () => { await cancelRunningQuery(running); });
 }
 
 export function deactivate(): void {}
