@@ -63,7 +63,7 @@ export async function previewTable(store: ConnectionStore, secrets: vscode.Secre
     const started = Date.now();
     try {
         const result = await vscode.window.withProgress(
-            { location: vscode.ProgressLocation.Window, title: `Loading ${item.table}…`, cancellable: true },
+            { location: vscode.ProgressLocation.Notification, title: `Loading ${item.table}…`, cancellable: true },
             (_, token) => fetchRows(limit, token)
         );
         await showSqlResults(
@@ -104,7 +104,7 @@ export async function runActiveSql(store: ConnectionStore, secrets: vscode.Secre
     const started = Date.now();
     try {
         const result = await vscode.window.withProgress(
-            { location: vscode.ProgressLocation.Window, title: `Executing on ${connection.name}…`, cancellable: true },
+            { location: vscode.ProgressLocation.Notification, title: `Running query on ${connection.name}…`, cancellable: true },
             (_, token) => new TrinoClient(secrets, connection, registry).query(sql, token)
         );
         const elapsed = Date.now() - started;

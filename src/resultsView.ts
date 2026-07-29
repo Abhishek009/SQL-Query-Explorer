@@ -82,7 +82,7 @@ export class ResultsViewProvider implements vscode.WebviewViewProvider {
             try {
                 const started = Date.now();
                 state.result = await vscode.window.withProgress(
-                    { location: vscode.ProgressLocation.Window, title: `Loading ${limit.toLocaleString()} rows…`, cancellable: true },
+                    { location: vscode.ProgressLocation.Notification, title: `Loading ${limit.toLocaleString()} rows…`, cancellable: true },
                     (_, token) => state.refetch!(limit, token)
                 );
                 state.milliseconds = Date.now() - started;

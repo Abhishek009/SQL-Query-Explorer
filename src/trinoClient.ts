@@ -85,15 +85,19 @@ export class TrinoClient {
         // currently in flight as well as the ones that would follow it.
         const abort = new AbortController();
         const live: { nextUri?: string } = {};
+        const cancel = async () => {
+            abort.abort();
+            if (live.nextUri) { await this.cancelQuery(live.nextUri, headers); }
+        };
         const entry = this.registry?.add({
             connectionName: this.connection.name,
             sql: statement,
             startedAt: Date.now(),
-            cancel: async () => {
-                abort.abort();
-                if (live.nextUri) { await this.cancelQuery(live.nextUri, headers); }
-            }
+            cancel
         });
+        // The progress notification's Cancel button trips this token; route it
+        // through the same path so Trino is told to stop, not just the socket.
+        const cancellation = token?.onCancellationRequested(() => { void cancel(); });
 
         try {
             let response = await this.request(`${baseUrl}/v1/statement`, {
@@ -132,6 +136,7 @@ export class TrinoClient {
             }
             return { columns: (columns ?? []).map(column => column.name), rows, truncated, maxRows };
         } finally {
+            cancellation?.dispose();
             if (entry) { this.registry?.remove(entry.id); }
         }
     }

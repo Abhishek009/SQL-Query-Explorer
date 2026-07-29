@@ -52,7 +52,7 @@ export class RunningQueryStatus implements vscode.Disposable {
     private readonly subscription: vscode.Disposable;
 
     public constructor(private readonly registry: RunningQueryRegistry) {
-        this.item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+        this.item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 1000);
         this.item.command = 'trino.cancelQuery';
         this.subscription = registry.onDidChange(() => this.render());
         this.render();
