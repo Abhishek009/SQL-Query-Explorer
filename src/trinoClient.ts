@@ -5,6 +5,9 @@ import { firstColumn, quoteIdentifier, summarize } from './util';
 import { httpBaseUrl } from './urls';
 import { RunningQueryRegistry } from './runningQueries';
 
+/** How long to wait for the query URI before abandoning a cancel attempt. */
+const CANCEL_URI_WAIT_MS = 3_000;
+
 export interface TrinoPage {
     id?: string;
     nextUri?: string;
@@ -84,10 +87,19 @@ export class TrinoClient {
         // One controller for the whole statement: cancelling has to stop the page
         // currently in flight as well as the ones that would follow it.
         const abort = new AbortController();
-        const live: { nextUri?: string } = {};
-        const cancel = async () => {
+        const live: { nextUri?: string; cancelled: boolean; finished: boolean } = { cancelled: false, finished: false };
+        const cancel = async (): Promise<boolean> => {
+            live.cancelled = true;
+            // Killing the query needs its URI, which only arrives with the first
+            // page. Aborting immediately would orphan a query Trino is already
+            // running, so wait briefly for the URI before giving up on it.
+            const deadline = Date.now() + CANCEL_URI_WAIT_MS;
+            while (!live.nextUri && !live.finished && Date.now() < deadline) {
+                await new Promise(resolve => setTimeout(resolve, 25));
+            }
+            const target = live.nextUri;
             abort.abort();
-            if (live.nextUri) { await this.cancelQuery(live.nextUri, headers); }
+            return target ? this.cancelQuery(target, headers) : live.finished;
         };
         const entry = this.registry?.add({
             connectionName: this.connection.name,
@@ -118,6 +130,7 @@ export class TrinoClient {
                     await this.cancelQuery(page.nextUri, headers);
                     break;
                 }
+                if (live.cancelled) { throw new Error('Trino query was cancelled.'); }
                 response = await this.request(page.nextUri, { method: 'GET', headers, signal: token, abort });
                 page = await this.readPage(response);
                 live.nextUri = page.nextUri;
@@ -136,15 +149,23 @@ export class TrinoClient {
             }
             return { columns: (columns ?? []).map(column => column.name), rows, truncated, maxRows };
         } finally {
+            live.finished = true;
             cancellation?.dispose();
             if (entry) { this.registry?.remove(entry.id); }
         }
     }
 
-    /** Best effort: a failed cancellation must not fail the query we already have. */
-    private async cancelQuery(nextUri: string, headers: Record<string, string>): Promise<void> {
-        try { await fetch(nextUri, { method: 'DELETE', headers }); }
-        catch { /* the coordinator will time the query out on its own */ }
+    /**
+     * Asks the coordinator to abandon the query. Returns whether it accepted:
+     * a failure here means the query may still be running on the cluster.
+     */
+    private async cancelQuery(nextUri: string, headers: Record<string, string>): Promise<boolean> {
+        try {
+            const response = await fetch(nextUri, { method: 'DELETE', headers });
+            return response.ok || response.status === 404; // 404 = already gone
+        } catch {
+            return false;
+        }
     }
 
     private async request(url: string, init: { method: string; headers: Record<string, string>; body?: string; signal?: vscode.CancellationToken; abort?: AbortController }): Promise<Response> {

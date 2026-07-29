@@ -8,7 +8,8 @@ export interface RunningQuery {
     startedAt: number;
     /** Trino's query id, known once the coordinator has accepted the statement. */
     queryId?: string;
-    cancel: () => Promise<void>;
+    /** Resolves true when the coordinator confirmed it stopped the query. */
+    cancel: () => Promise<boolean>;
 }
 
 /** Tracks statements that are still in flight so they can be shown and killed. */
@@ -104,8 +105,16 @@ export async function cancelRunningQuery(registry: RunningQueryRegistry): Promis
     }
     const chosen = running.length === 1 ? running[0] : await pickQuery(running);
     if (!chosen) { return; }
-    await chosen.cancel();
-    vscode.window.showInformationMessage(`Cancelled the query on "${chosen.connectionName}".`);
+    const stopped = await chosen.cancel();
+    if (stopped) {
+        vscode.window.showInformationMessage(`Cancelled the query on "${chosen.connectionName}".`);
+    } else {
+        // Be honest: we stopped reading, but the cluster may still be working.
+        vscode.window.showWarningMessage(
+            `Stopped waiting for the query on "${chosen.connectionName}", but the coordinator did not confirm it was cancelled` +
+            `${chosen.queryId ? ` (query ${chosen.queryId})` : ''}. It may still be running on the cluster.`
+        );
+    }
 }
 
 async function pickQuery(running: RunningQuery[]): Promise<RunningQuery | undefined> {
