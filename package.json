@@ -90,6 +90,11 @@
         "command": "trino.cancelQuery",
         "title": "Trino: Cancel Running Query",
         "icon": "$(stop-circle)"
+      },
+      {
+        "command": "trino.showTableDdl",
+        "title": "Trino: Show Table DDL",
+        "icon": "$(file-code)"
       }
     ],
     "configuration": {
@@ -235,6 +240,10 @@
         {
           "command": "trino.tableClicked",
           "when": "false"
+        },
+        {
+          "command": "trino.showTableDdl",
+          "when": "false"
         }
       ],
       "view/title": [
@@ -264,6 +273,11 @@
           "command": "trino.previewTable",
           "when": "view == trinoCatalogs && viewItem == trino.table",
           "group": "1_table@1"
+        },
+        {
+          "command": "trino.showTableDdl",
+          "when": "view == trinoCatalogs && viewItem == trino.table",
+          "group": "1_table@2"
         },
         {
           "command": "trino.refreshCatalogs",

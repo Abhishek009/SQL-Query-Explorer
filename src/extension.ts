@@ -4,7 +4,7 @@ import { TrinoExplorerProvider, ExplorerDragController, ExplorerItem } from './e
 import { ResultsViewProvider } from './resultsView';
 import { QueryStatusProvider } from './queryStatus';
 import { SqlCompletionProvider } from './completion';
-import { openSqlQueryEditor, pickConnection, previewTable, resolveConnection, runActiveSql, showConnectionWindow } from './commands';
+import { openSqlQueryEditor, pickConnection, previewTable, resolveConnection, runActiveSql, showConnectionWindow, showTableDdl } from './commands';
 import { showConnectionError } from './util';
 import { RunningQueryRegistry, RunningQueryStatus, cancelRunningQuery } from './runningQueries';
 
@@ -94,6 +94,9 @@ export function activate(context: vscode.ExtensionContext): void {
     });
     register('trino.tableClicked', async (item?: ExplorerItem) => {
         await previewTable(store, context.secrets, results, running, item);
+    });
+    register('trino.showTableDdl', async (item?: ExplorerItem) => {
+        await showTableDdl(store, context.secrets, results, running, item);
     });
     register('trino.openQuery', async () => { await openSqlQueryEditor(store); });
     register('trino.runActiveSql', async () => { await runActiveSql(store, context.secrets, status, results, running); });

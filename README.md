@@ -33,6 +33,7 @@ Details:
 - Lazy hierarchy of **connection → catalog → schema → table → column**, fetched only when you expand a node.
 - **Columns show their data type** beside the name, with comments and the fully-qualified name on hover.
 - **Double-click a table** to preview its rows, or use the inline preview icon / context menu for a single click.
+- **Right-click a table → Show Table DDL** to open its `SHOW CREATE TABLE` output in a SQL editor.
 
 ### SQL editor and execution
 - **Trino: New SQL Query** opens a native VS Code SQL editor, so normal editing, syntax highlighting, and GitHub Copilot all work.
@@ -67,7 +68,9 @@ Queries without a `LIMIT` could otherwise pull an entire table into memory. The 
 | `Trino: New SQL Query` | Open a new SQL editor. |
 | `Trino: Run SQL Query` | Execute the selection, or the whole editor if nothing is selected. |
 | `Trino: Preview Table Data` | Run a bounded `SELECT` against the selected table. |
+| `Trino: Show Table DDL` | Open `SHOW CREATE TABLE` output for the selected table. |
 | `Trino: Refresh Catalogs` | Reload the tree and clear cached metadata. |
+| `Trino: Cancel Running Query` | Stop a running query on the coordinator. |
 
 ### Settings
 
@@ -96,7 +99,6 @@ The older `trino.connection.*` settings are deprecated. Existing values are migr
 ## Roadmap
 
 - **Query history and saved queries** — persist previously run statements, re-run them, and bookmark favourites.
-- **`SHOW CREATE TABLE`** — generate DDL from the explorer.
 - **Enterprise authentication** — OAuth2, JWT, and Kerberos beyond the current user and password.
 - **Natural ordering for text sorts** — restore `item9` before `item10` for text columns without the performance cost.
 

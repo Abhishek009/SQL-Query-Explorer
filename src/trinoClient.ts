@@ -48,6 +48,13 @@ export class TrinoClient {
         })).filter(column => column.name);
     }
 
+    /** SHOW CREATE TABLE returns the DDL as a single cell. */
+    public async tableDdl(catalog: string, schema: string, table: string, token?: vscode.CancellationToken): Promise<string> {
+        const qualified = `${quoteIdentifier(catalog)}.${quoteIdentifier(schema)}.${quoteIdentifier(table)}`;
+        const result = await this.query(`SHOW CREATE TABLE ${qualified}`, token);
+        return result.rows.map(row => String(row[0] ?? '')).join('\n').trim();
+    }
+
     public async query(statement: string, token?: vscode.CancellationToken): Promise<TrinoQueryResult> {
         const normalizedStatement = statement.trim().replace(/;+$/, '');
         if (!normalizedStatement) { throw new Error('Enter a SQL statement before running it.'); }
