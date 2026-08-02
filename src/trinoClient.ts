@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { StoredConnection, TrinoColumn, TrinoQueryResult, TrinoRequestError } from './types';
 import { passwordKey } from './connectionStore';
-import { firstColumn, quoteIdentifier, summarize } from './util';
+import { describeFetchFailure, firstColumn, quoteIdentifier, summarize } from './util';
 import { httpBaseUrl } from './urls';
 import { RunningQueryRegistry } from './runningQueries';
 
@@ -182,7 +182,7 @@ export class TrinoClient {
             return await fetch(url, { method: init.method, headers: init.headers, body: init.body, signal: controller.signal });
         } catch (error) {
             if (controller.signal.aborted) { throw new Error('Trino query was cancelled.'); }
-            throw error;
+            throw describeFetchFailure(error, url);
         } finally {
             cancellation?.dispose();
         }
