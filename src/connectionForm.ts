@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { parseTrinoUrl } from './urls';
+import { parseTrinoUrl, splitHostPort } from './urls';
 
 export interface ConnectionFormData {
     name: string;
@@ -30,7 +30,11 @@ export function isConnectionMessage(value: unknown): value is ConnectionMessage 
  */
 export function expandPastedUrl(message: ConnectionMessage): ConnectionMessage {
     const parsed = parseTrinoUrl(message.host);
-    if (!parsed) { return message; }
+    if (!parsed) {
+        // No scheme, so it is a plain host — but it may still carry a port.
+        const { host, port } = splitHostPort(message.host);
+        return { ...message, host, port: port ?? message.port };
+    }
     return {
         ...message,
         host: parsed.host,

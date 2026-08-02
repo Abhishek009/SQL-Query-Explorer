@@ -18,6 +18,7 @@ The Host field accepts a plain host name, an HTTP(S) URL, or a Trino JDBC connec
 | You enter | Resolves to |
 | --- | --- |
 | `trino.example.com` | `http://trino.example.com:8080` |
+| `localhost:8080` | `http://localhost:8080` (plain HTTP, e.g. a local Docker coordinator) |
 | `https://trino.example.com:8443` | `https://trino.example.com:8443` |
 | `jdbc:trino://trino.example.com:8443/hive/default?SSL=true` | `https://trino.example.com:8443`, catalog `hive`, schema `default` |
 | `jdbc:trino://localhost:8080/tpch` | `http://localhost:8080`, catalog `tpch` |
@@ -25,6 +26,8 @@ The Host field accepts a plain host name, an HTTP(S) URL, or a Trino JDBC connec
 Details:
 - `SSL=true` selects HTTPS, as do ports `443` and `8443`. Parameter names are matched case-insensitively.
 - A `/catalog/schema` path and a `user=` parameter populate those fields; anything already typed into the form takes precedence, and anything the URL omits keeps the value you chose.
+- A `host:port` typed without a scheme fills in the port too, so `localhost:8080` works. Bare IPv6 literals such as `::1` are left intact.
+- Plain HTTP is fully supported and is the default; leave **Enable SSL / HTTPS** off for a local or Docker coordinator.
 - `jdbc:presto://` is accepted for older deployments.
 - A password in the URL is **ignored by design**, so it never lands in `settings.json` in clear text — enter it in the form instead, where it goes to Secret Storage.
 - JDBC-only parameters such as `SSLVerification`, `KerberosRemoteServiceName`, and `extraCredentials` are parsed but not yet applied.

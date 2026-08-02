@@ -95,6 +95,11 @@
         "command": "trino.showTableDdl",
         "title": "Trino: Show Table DDL",
         "icon": "$(file-code)"
+      },
+      {
+        "command": "trino.refreshNode",
+        "title": "Refresh",
+        "icon": "$(refresh)"
       }
     ],
     "configuration": {
@@ -244,6 +249,10 @@
         {
           "command": "trino.showTableDdl",
           "when": "false"
+        },
+        {
+          "command": "trino.refreshNode",
+          "when": "false"
         }
       ],
       "view/title": [
@@ -278,6 +287,16 @@
           "command": "trino.showTableDdl",
           "when": "view == trinoCatalogs && viewItem == trino.table",
           "group": "1_table@2"
+        },
+        {
+          "command": "trino.refreshNode",
+          "when": "view == trinoCatalogs && viewItem =~ /^trino\\.(catalog|schema|table)$/",
+          "group": "inline@9"
+        },
+        {
+          "command": "trino.refreshNode",
+          "when": "view == trinoCatalogs && viewItem =~ /^trino\\.(catalog|schema|table)$/",
+          "group": "9_refresh@1"
         },
         {
           "command": "trino.refreshCatalogs",

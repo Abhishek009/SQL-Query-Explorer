@@ -85,6 +85,21 @@ export function activate(context: vscode.ExtensionContext): void {
         try { await provider.connect(connection); }
         catch (error) { showConnectionError(error); }
     });
+    register('trino.refreshNode', async (item?: ExplorerItem) => {
+        if (!item) { return; }
+        if (item.kind === 'connection' && item.connectionId) {
+            provider.forget(item.connectionId);
+            completions.clear();
+            const connection = store.get(item.connectionId);
+            if (!connection) { return; }
+            try { await provider.connect(connection); }
+            catch (error) { showConnectionError(error); }
+            return;
+        }
+        // Cached metadata would otherwise keep serving the pre-refresh names.
+        completions.clear();
+        provider.refreshItem(item);
+    });
     register('trino.configureConnection', async () => {
         const connection = store.get(store.activeId);
         await showConnectionWindow(context, store, provider, connection);

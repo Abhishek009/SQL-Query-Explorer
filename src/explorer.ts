@@ -66,6 +66,12 @@ export class TrinoExplorerProvider implements vscode.TreeDataProvider<ExplorerIt
 
     public refresh(): void { this.changed.fire(undefined); }
 
+    /**
+     * Redraws one branch. Schemas, tables, and columns are fetched on expand and
+     * never cached here, so firing for the node is enough to re-query it.
+     */
+    public refreshItem(item: ExplorerItem): void { this.changed.fire(item); }
+
     private async loadCatalogs(client: TrinoClient, connection: StoredConnection): Promise<string[]> {
         const catalogs = await vscode.window.withProgress(
             { location: vscode.ProgressLocation.Window, title: `Connecting to ${connection.name}…`, cancellable: true },

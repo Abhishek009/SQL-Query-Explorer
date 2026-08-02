@@ -78,3 +78,18 @@ export function parseConnectionUrl(value: string): { host: string; port: string;
 export function formatHost(host: string): string {
     return host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
 }
+
+/**
+ * Splits a "host:port" typed into the Host field, which is how people naturally
+ * write a local coordinator ("localhost:8080"). A bare IPv6 literal has several
+ * colons and no port, so it is left intact.
+ */
+export function splitHostPort(value: string): { host: string; port?: string } {
+    const trimmed = value.trim();
+    const bracketedWithPort = /^\[(.+)\]:(\d{1,5})$/.exec(trimmed);
+    if (bracketedWithPort) { return { host: bracketedWithPort[1], port: bracketedWithPort[2] }; }
+    if (/^\[.+\]$/.test(trimmed)) { return { host: trimmed.slice(1, -1) }; }
+    const hostAndPort = /^([^:]+):(\d{1,5})$/.exec(trimmed);
+    if (hostAndPort) { return { host: hostAndPort[1], port: hostAndPort[2] }; }
+    return { host: trimmed };
+}
