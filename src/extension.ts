@@ -12,7 +12,8 @@ export function activate(context: vscode.ExtensionContext): void {
     const store = new ConnectionStore(context);
     const provider = new TrinoExplorerProvider(store, context.secrets);
     const status = new QueryStatusProvider(context);
-    const results = new ResultsViewProvider();
+    const results = new ResultsViewProvider(ResultsViewProvider.panelViewId);
+    const sideResults = new ResultsViewProvider(ResultsViewProvider.sideViewId);
     const completions = new SqlCompletionProvider(store, context.secrets);
     const running = new RunningQueryRegistry();
     void store.migrateLegacyConnection();
@@ -29,7 +30,10 @@ export function activate(context: vscode.ExtensionContext): void {
             canSelectMany: true,
             showCollapseAll: true
         }),
-        vscode.window.registerWebviewViewProvider(ResultsViewProvider.viewId, results, {
+        vscode.window.registerWebviewViewProvider(results.viewId, results, {
+            webviewOptions: { retainContextWhenHidden: true }
+        }),
+        vscode.window.registerWebviewViewProvider(sideResults.viewId, sideResults, {
             webviewOptions: { retainContextWhenHidden: true }
         }),
         vscode.languages.registerCodeLensProvider({ language: 'sql' }, status),
@@ -121,10 +125,28 @@ export function activate(context: vscode.ExtensionContext): void {
     register('trino.runStatement', async (args?: { uri?: string; sql?: string; line?: number }) => {
         await runStatement(store, context.secrets, status, results, running, args);
     });
-    register('trino.runStatementInTab', async (args?: { uri?: string; sql?: string; line?: number }) => {
-        await runStatement(store, context.secrets, status, results, running, { ...args, inTab: true });
+    register('trino.runStatementInSide', async (args?: { uri?: string; sql?: string; line?: number }) => {
+        await runStatement(store, context.secrets, status, sideResults, running, args);
+        await hintSecondarySideBar(context);
     });
     register('trino.cancelQuery', async () => { await cancelRunningQuery(running); });
+}
+
+/**
+ * No extension can place a view in the Secondary Side Bar, so say once that the
+ * user can drag it there. VS Code then remembers the location permanently.
+ */
+async function hintSecondarySideBar(context: vscode.ExtensionContext): Promise<void> {
+    const key = 'trino.sideResultsHintShown';
+    if (context.globalState.get<boolean>(key)) { return; }
+    await context.globalState.update(key, true);
+    const choice = await vscode.window.showInformationMessage(
+        'Results opened in the "Trino Results (Side)" view. Drag it into the Secondary Side Bar to keep it beside your editor — VS Code will remember the position.',
+        'Show Secondary Side Bar'
+    );
+    if (choice) {
+        await vscode.commands.executeCommand('workbench.action.toggleAuxiliaryBar');
+    }
 }
 
 export function deactivate(): void {}

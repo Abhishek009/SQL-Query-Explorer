@@ -94,10 +94,16 @@ abstract class ResultsSurface {
     }
 }
 
-/** The shared grid in the bottom panel, reused by every query. */
+/**
+ * A results grid bound to a contributed view. Two exist: the shared one in the
+ * bottom panel, and a second that can be parked in the Secondary Side Bar.
+ */
 export class ResultsViewProvider extends ResultsSurface implements vscode.WebviewViewProvider {
-    public static readonly viewId = 'trinoResultsView';
+    public static readonly panelViewId = 'trinoResultsView';
+    public static readonly sideViewId = 'trinoResultsSideView';
     private view: vscode.WebviewView | undefined;
+
+    public constructor(public readonly viewId: string = ResultsViewProvider.panelViewId) { super(); }
 
     public resolveWebviewView(view: vscode.WebviewView): void {
         this.view = view;
@@ -112,35 +118,8 @@ export class ResultsViewProvider extends ResultsSurface implements vscode.Webvie
     protected async reveal(): Promise<void> {
         if (!this.view) {
             // Focusing the view forces VS Code to construct it, which resolves it above.
-            await vscode.commands.executeCommand(`${ResultsViewProvider.viewId}.focus`, { preserveFocus: true });
+            await vscode.commands.executeCommand(`${this.viewId}.focus`, { preserveFocus: true });
         }
         this.view?.show(true);
-    }
-}
-
-/**
- * A results grid in its own editor tab, so a result can be kept side by side
- * while later queries replace the shared panel.
- */
-export class ResultsTabPanel extends ResultsSurface {
-    private panel: vscode.WebviewPanel | undefined;
-
-    public constructor(private readonly title: string) { super(); }
-
-    protected webview(): vscode.Webview | undefined { return this.panel?.webview; }
-
-    protected async reveal(): Promise<void> {
-        if (!this.panel) {
-            this.panel = vscode.window.createWebviewPanel(
-                'trinoResultsTab',
-                this.title,
-                { viewColumn: vscode.ViewColumn.Active, preserveFocus: true },
-                { enableScripts: true, retainContextWhenHidden: true }
-            );
-            this.panel.webview.onDidReceiveMessage((message: unknown) => void this.handle(message));
-            this.panel.onDidDispose(() => { this.panel = undefined; });
-        } else {
-            this.panel.reveal(undefined, true);
-        }
     }
 }

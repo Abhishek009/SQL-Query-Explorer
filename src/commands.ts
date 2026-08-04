@@ -4,7 +4,7 @@ import { ErrorState, ResultsState, StoredConnection, TrinoQueryResult, TrinoRequ
 import { ConnectionStore, passwordKey } from './connectionStore';
 import { TrinoClient } from './trinoClient';
 import { ExplorerItem, TrinoExplorerProvider, qualifiedName } from './explorer';
-import { ResultsTabPanel, ResultsViewProvider } from './resultsView';
+import { ResultsViewProvider } from './resultsView';
 import { QueryStatusProvider } from './queryStatus';
 import { RunningQueryRegistry } from './runningQueries';
 import { ConnectionMessage, connectionFormHtml, expandPastedUrl, isConnectionMessage, parseMaxRows, validateConnection } from './connectionForm';
@@ -212,14 +212,15 @@ export async function runStatement(
     store: ConnectionStore,
     secrets: vscode.SecretStorage,
     status: QueryStatusProvider,
-    results: ResultsViewProvider,
+    surface: ResultsViewProvider,
     registry: RunningQueryRegistry,
-    args?: { uri?: string; sql?: string; line?: number; inTab?: boolean }
+    args?: { uri?: string; sql?: string; line?: number }
 ): Promise<void> {
     if (!args?.sql || !args.uri) { return; }
-    const uri = vscode.Uri.parse(args.uri);
-    const surface = args.inTab ? new ResultsTabPanel(tabTitle(args.sql)) : results;
-    await executeSql({ store, secrets, status, registry, surface, sql: args.sql, line: args.line ?? 0, uri });
+    await executeSql({
+        store, secrets, status, registry, surface,
+        sql: args.sql, line: args.line ?? 0, uri: vscode.Uri.parse(args.uri)
+    });
 }
 
 /** A short, recognisable tab name taken from the statement itself. */

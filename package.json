@@ -112,9 +112,9 @@
         "icon": "$(play)"
       },
       {
-        "command": "trino.runStatementInTab",
-        "title": "Trino: Run Statement in New Tab",
-        "icon": "$(split-horizontal)"
+        "command": "trino.runStatementInSide",
+        "title": "Trino: Run Statement in Side View",
+        "icon": "$(layout-sidebar-right)"
       }
     ],
     "configuration": {
@@ -229,6 +229,14 @@
           "name": "Connections",
           "icon": "resources/trino.svg",
           "contextualTitle": "Trino"
+        },
+        {
+          "id": "trinoResultsSideView",
+          "name": "Results (Side)",
+          "type": "webview",
+          "icon": "resources/trino.svg",
+          "contextualTitle": "Trino Results",
+          "visibility": "collapsed"
         }
       ],
       "trinoResults": [
@@ -278,7 +286,7 @@
           "when": "false"
         },
         {
-          "command": "trino.runStatementInTab",
+          "command": "trino.runStatementInSide",
           "when": "false"
         }
       ],
