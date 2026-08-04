@@ -1,10 +1,10 @@
 import * as vscode from 'vscode';
 import { randomUUID } from 'crypto';
-import { ResultsState, StoredConnection, TrinoQueryResult, TrinoRequestError } from './types';
+import { ErrorState, ResultsState, StoredConnection, TrinoQueryResult, TrinoRequestError } from './types';
 import { ConnectionStore, passwordKey } from './connectionStore';
 import { TrinoClient } from './trinoClient';
 import { ExplorerItem, TrinoExplorerProvider, qualifiedName } from './explorer';
-import { ResultsViewProvider } from './resultsView';
+import { ResultsTabPanel, ResultsViewProvider } from './resultsView';
 import { QueryStatusProvider } from './queryStatus';
 import { RunningQueryRegistry } from './runningQueries';
 import { ConnectionMessage, connectionFormHtml, expandPastedUrl, isConnectionMessage, parseMaxRows, validateConnection } from './connectionForm';
@@ -148,13 +148,37 @@ export async function runActiveSql(store: ConnectionStore, secrets: vscode.Secre
         vscode.window.showErrorMessage('Open a Trino SQL query editor before running a query.');
         return;
     }
-    const connection = await resolveConnection(store);
-    if (!connection) { return; }
     const selectedSql = editor.document.getText(editor.selection).trim();
     const sql = selectedSql || editor.document.getText();
     // Anchor the timing above the statement that ran: the selection, or the
     // first non-empty line when the whole editor is executed.
     const line = selectedSql ? editor.selection.start.line : firstStatementLine(editor.document);
+    await executeSql({ store, secrets, status, registry, surface: results, sql, line, uri: editor.document.uri });
+}
+
+export interface ExecuteRequest {
+    store: ConnectionStore;
+    secrets: vscode.SecretStorage;
+    status: QueryStatusProvider;
+    registry: RunningQueryRegistry;
+    /** Where the grid is drawn: the shared panel, or a dedicated tab. */
+    surface: ResultsSurfaceLike;
+    sql: string;
+    line: number;
+    uri: vscode.Uri;
+}
+
+/** Anything that can draw a results grid: the panel view or a tab panel. */
+export interface ResultsSurfaceLike {
+    showResults(state: ResultsState): Promise<void>;
+    showError(state: ErrorState): Promise<void>;
+}
+
+/** One execution path for every entry point, so timing and errors stay uniform. */
+export async function executeSql(request: ExecuteRequest): Promise<void> {
+    const { store, secrets, status, registry, surface, sql, line, uri } = request;
+    const connection = await resolveConnection(store);
+    if (!connection) { return; }
     const started = Date.now();
     try {
         const result = await vscode.window.withProgress(
@@ -162,13 +186,49 @@ export async function runActiveSql(store: ConnectionStore, secrets: vscode.Secre
             (_, token) => new TrinoClient(secrets, connection, registry).query(sql, token)
         );
         const elapsed = Date.now() - started;
-        status.record(editor.document.uri, { line, milliseconds: elapsed, rows: result.rows.length });
-        await showSqlResults(results, result, connection, { sql, milliseconds: elapsed });
+        status.record(uri, { line, milliseconds: elapsed, rows: result.rows.length });
+        await surface.showResults({
+            connection,
+            result,
+            limit: previewRowLimit(),
+            sql,
+            milliseconds: elapsed,
+            executedAt: Date.now()
+        });
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        status.record(editor.document.uri, { line, milliseconds: Date.now() - started, rows: 0, error: summarize(message) });
-        await showQueryError(results, error, connection, sql);
+        status.record(uri, { line, milliseconds: Date.now() - started, rows: 0, error: summarize(message) });
+        await surface.showError({
+            connection,
+            sql,
+            message,
+            details: error instanceof TrinoRequestError ? error.details : undefined
+        });
     }
+}
+
+/** Runs one statement from a CodeLens, optionally into its own results tab. */
+export async function runStatement(
+    store: ConnectionStore,
+    secrets: vscode.SecretStorage,
+    status: QueryStatusProvider,
+    results: ResultsViewProvider,
+    registry: RunningQueryRegistry,
+    args?: { uri?: string; sql?: string; line?: number; inTab?: boolean }
+): Promise<void> {
+    if (!args?.sql || !args.uri) { return; }
+    const uri = vscode.Uri.parse(args.uri);
+    const surface = args.inTab ? new ResultsTabPanel(tabTitle(args.sql)) : results;
+    await executeSql({ store, secrets, status, registry, surface, sql: args.sql, line: args.line ?? 0, uri });
+}
+
+/** A short, recognisable tab name taken from the statement itself. */
+export function tabTitle(sql: string): string {
+    // A qualified name whose parts may be quoted, so "order details" survives.
+    const part = '(?:"(?:[^"]|"")*"|[A-Za-z0-9_$]+)';
+    const from = new RegExp(`\\bfrom\\s+(${part}(?:\\.${part})*)`, 'i').exec(sql)?.[1];
+    const last = from?.match(new RegExp(part, 'g'))?.pop()?.replace(/^"|"$/g, '').replace(/""/g, '"');
+    return last ? `Results: ${last}` : 'Trino Results';
 }
 
 export function firstStatementLine(document: vscode.TextDocument): number {

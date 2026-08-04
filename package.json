@@ -105,6 +105,16 @@
         "command": "trino.newQueryHere",
         "title": "New Query Here",
         "icon": "$(new-file)"
+      },
+      {
+        "command": "trino.runStatement",
+        "title": "Trino: Run Statement",
+        "icon": "$(play)"
+      },
+      {
+        "command": "trino.runStatementInTab",
+        "title": "Trino: Run Statement in New Tab",
+        "icon": "$(split-horizontal)"
       }
     ],
     "configuration": {
@@ -261,6 +271,14 @@
         },
         {
           "command": "trino.newQueryHere",
+          "when": "false"
+        },
+        {
+          "command": "trino.runStatement",
+          "when": "false"
+        },
+        {
+          "command": "trino.runStatementInTab",
           "when": "false"
         }
       ],

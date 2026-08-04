@@ -4,19 +4,17 @@ import { emptyResultsHtml, queryErrorHtml, sqlResultsHtml } from './resultsHtml'
 import { exportResult } from './exporter';
 import { clampRowLimit } from './util';
 
-export class ResultsViewProvider implements vscode.WebviewViewProvider {
-    public static readonly viewId = 'trinoResultsView';
-    private view: vscode.WebviewView | undefined;
-    private results: ResultsState | undefined;
-    private failure: ErrorState | undefined;
+/**
+ * Everything a results grid does — sorting, the row limit, export — independent
+ * of whether it is drawn in the bottom panel or in an editor tab. Subclasses
+ * only supply the webview and how to bring it into view.
+ */
+abstract class ResultsSurface {
+    protected results: ResultsState | undefined;
+    protected failure: ErrorState | undefined;
 
-    public resolveWebviewView(view: vscode.WebviewView): void {
-        this.view = view;
-        view.webview.options = { enableScripts: true };
-        view.webview.onDidReceiveMessage((message: unknown) => void this.handle(message));
-        this.paint();
-        view.onDidDispose(() => { this.view = undefined; });
-    }
+    protected abstract webview(): vscode.Webview | undefined;
+    protected abstract reveal(): Promise<void>;
 
     public async showResults(state: ResultsState): Promise<void> {
         this.results = state;
@@ -32,25 +30,17 @@ export class ResultsViewProvider implements vscode.WebviewViewProvider {
         this.paint();
     }
 
-    private async reveal(): Promise<void> {
-        if (!this.view) {
-            // Focusing the view forces VS Code to construct it, which resolves it above.
-            await vscode.commands.executeCommand(`${ResultsViewProvider.viewId}.focus`, { preserveFocus: true });
-        }
-        this.view?.show(true);
-    }
-
-    private paint(): void {
-        if (!this.view) { return; }
-        const webview = this.view.webview;
-        this.view.webview.html = this.failure
+    protected paint(): void {
+        const webview = this.webview();
+        if (!webview) { return; }
+        webview.html = this.failure
             ? queryErrorHtml(webview, this.failure)
             : this.results
                 ? sqlResultsHtml(webview, this.results)
                 : emptyResultsHtml(webview);
     }
 
-    private async handle(message: unknown): Promise<void> {
+    protected async handle(message: unknown): Promise<void> {
         const request = message as { type?: string; value?: number; format?: string };
         if (!this.results || !request?.type) { return; }
         if (request.type === 'limit') {
@@ -101,5 +91,56 @@ export class ResultsViewProvider implements vscode.WebviewViewProvider {
         }
         state.limit = limit;
         this.paint();
+    }
+}
+
+/** The shared grid in the bottom panel, reused by every query. */
+export class ResultsViewProvider extends ResultsSurface implements vscode.WebviewViewProvider {
+    public static readonly viewId = 'trinoResultsView';
+    private view: vscode.WebviewView | undefined;
+
+    public resolveWebviewView(view: vscode.WebviewView): void {
+        this.view = view;
+        view.webview.options = { enableScripts: true };
+        view.webview.onDidReceiveMessage((message: unknown) => void this.handle(message));
+        this.paint();
+        view.onDidDispose(() => { this.view = undefined; });
+    }
+
+    protected webview(): vscode.Webview | undefined { return this.view?.webview; }
+
+    protected async reveal(): Promise<void> {
+        if (!this.view) {
+            // Focusing the view forces VS Code to construct it, which resolves it above.
+            await vscode.commands.executeCommand(`${ResultsViewProvider.viewId}.focus`, { preserveFocus: true });
+        }
+        this.view?.show(true);
+    }
+}
+
+/**
+ * A results grid in its own editor tab, so a result can be kept side by side
+ * while later queries replace the shared panel.
+ */
+export class ResultsTabPanel extends ResultsSurface {
+    private panel: vscode.WebviewPanel | undefined;
+
+    public constructor(private readonly title: string) { super(); }
+
+    protected webview(): vscode.Webview | undefined { return this.panel?.webview; }
+
+    protected async reveal(): Promise<void> {
+        if (!this.panel) {
+            this.panel = vscode.window.createWebviewPanel(
+                'trinoResultsTab',
+                this.title,
+                { viewColumn: vscode.ViewColumn.Active, preserveFocus: true },
+                { enableScripts: true, retainContextWhenHidden: true }
+            );
+            this.panel.webview.onDidReceiveMessage((message: unknown) => void this.handle(message));
+            this.panel.onDidDispose(() => { this.panel = undefined; });
+        } else {
+            this.panel.reveal(undefined, true);
+        }
     }
 }

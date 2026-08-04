@@ -42,6 +42,7 @@ Details:
 
 ### SQL editor and execution
 - **Trino: New SQL Query** opens a native VS Code SQL editor, so normal editing, syntax highlighting, and GitHub Copilot all work.
+- **Run / Tab actions above every statement** — `Run` sends it to the Trino Results panel, `Tab` opens the results in their own editor tab so you can keep them side by side.
 - **Trino: Run SQL Query** from the editor title bar or `Cmd+Enter` / `Ctrl+Enter`. If text is selected only the selection runs; otherwise the whole editor runs.
 - **Autocomplete from live metadata** — typing `tpch.` suggests schemas, `tpch.sf1.` suggests tables, and `tpch.sf1.customer.` suggests columns with their types. Results are cached briefly and refresh with the connection.
 - **Execution feedback in the editor**: a timing line above the statement (`✓ 619ms · 1,500 row(s)`) plus a green tick or red cross in the gutter.

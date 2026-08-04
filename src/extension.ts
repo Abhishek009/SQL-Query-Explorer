@@ -4,7 +4,7 @@ import { TrinoExplorerProvider, ExplorerDragController, ExplorerItem } from './e
 import { ResultsViewProvider } from './resultsView';
 import { QueryStatusProvider } from './queryStatus';
 import { SqlCompletionProvider } from './completion';
-import { openScopedQuery, openSqlQueryEditor, pickConnection, previewTable, resolveConnection, runActiveSql, showConnectionWindow, showTableDdl } from './commands';
+import { openScopedQuery, openSqlQueryEditor, pickConnection, previewTable, resolveConnection, runActiveSql, runStatement, showConnectionWindow, showTableDdl } from './commands';
 import { showConnectionError } from './util';
 import { RunningQueryRegistry, RunningQueryStatus, cancelRunningQuery } from './runningQueries';
 
@@ -118,6 +118,12 @@ export function activate(context: vscode.ExtensionContext): void {
     });
     register('trino.openQuery', async () => { await openSqlQueryEditor(store); });
     register('trino.runActiveSql', async () => { await runActiveSql(store, context.secrets, status, results, running); });
+    register('trino.runStatement', async (args?: { uri?: string; sql?: string; line?: number }) => {
+        await runStatement(store, context.secrets, status, results, running, args);
+    });
+    register('trino.runStatementInTab', async (args?: { uri?: string; sql?: string; line?: number }) => {
+        await runStatement(store, context.secrets, status, results, running, { ...args, inTab: true });
+    });
     register('trino.cancelQuery', async () => { await cancelRunningQuery(running); });
 }
 

@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { formatDuration } from './util';
+import { splitStatements } from './statements';
 
 export interface QueryOutcome {
     line: number;
@@ -65,13 +66,37 @@ export class QueryStatusProvider implements vscode.CodeLensProvider, vscode.Disp
     }
 
     public provideCodeLenses(document: vscode.TextDocument): vscode.CodeLens[] {
-        const outcome = this.outcomes.get(document.uri.toString());
-        if (!outcome) { return []; }
-        const line = this.anchor(outcome, document);
-        const elapsed = formatDuration(outcome.milliseconds);
-        const title = outcome.error
-            ? `$(error) Failed in ${elapsed} — ${outcome.error}`
-            : `$(check) ${elapsed} · ${outcome.rows.toLocaleString()} row(s)`;
-        return [new vscode.CodeLens(new vscode.Range(line, 0, line, 0), { title, command: '' })];
+        const lenses: vscode.CodeLens[] = [];
+        const uri = document.uri.toString();
+
+        // Run actions sit above every statement in the script.
+        for (const statement of splitStatements(document.getText())) {
+            const line = Math.min(statement.line, Math.max(document.lineCount - 1, 0));
+            const range = new vscode.Range(line, 0, line, 0);
+            const args = [{ uri, sql: statement.text, line: statement.line }];
+            lenses.push(new vscode.CodeLens(range, {
+                title: '$(play) Run',
+                tooltip: 'Run this statement and show the results in the Trino Results panel',
+                command: 'trino.runStatement',
+                arguments: args
+            }));
+            lenses.push(new vscode.CodeLens(range, {
+                title: '$(split-horizontal) Tab',
+                tooltip: 'Run this statement and show the results in a new tab',
+                command: 'trino.runStatementInTab',
+                arguments: args
+            }));
+        }
+
+        const outcome = this.outcomes.get(uri);
+        if (outcome) {
+            const line = this.anchor(outcome, document);
+            const elapsed = formatDuration(outcome.milliseconds);
+            const title = outcome.error
+                ? `$(error) Failed in ${elapsed} — ${outcome.error}`
+                : `$(check) ${elapsed} · ${outcome.rows.toLocaleString()} row(s)`;
+            lenses.push(new vscode.CodeLens(new vscode.Range(line, 0, line, 0), { title, command: '' }));
+        }
+        return lenses;
     }
 }
