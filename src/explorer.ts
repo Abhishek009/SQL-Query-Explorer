@@ -267,7 +267,7 @@ export class ExplorerItem extends vscode.TreeItem {
 
     public static table(connectionId: string, catalog: string, schema: string, table: string, view = false): ExplorerItem {
         const item = new ExplorerItem(table, 'table', connectionId, catalog, schema, table);
-        item.description = view ? 'VIEW' : 'TABLE';
+        // The parent folder already says which it is, so the label stays clean.
         item.iconPath = new vscode.ThemeIcon(view ? 'eye' : 'list-flat');
         item.contextValue = view ? 'trino.view' : 'trino.table';
         item.tooltip = `${catalog}.${schema}.${table}`;
