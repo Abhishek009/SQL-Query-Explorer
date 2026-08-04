@@ -27,6 +27,11 @@ export class TrinoRequestError extends Error {
     }
 }
 
+export interface TableEntry {
+    name: string;
+    view: boolean;
+}
+
 export interface TrinoColumn {
     name: string;
     type: string;

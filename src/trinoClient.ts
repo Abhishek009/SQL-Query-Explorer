@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
-import { StoredConnection, TrinoColumn, TrinoQueryResult, TrinoRequestError } from './types';
+import { StoredConnection, TableEntry, TrinoColumn, TrinoQueryResult, TrinoRequestError } from './types';
 import { passwordKey } from './connectionStore';
-import { describeFetchFailure, firstColumn, quoteIdentifier, summarize } from './util';
+import { describeFetchFailure, firstColumn, quoteIdentifier, quoteLiteral, summarize } from './util';
 import { httpBaseUrl } from './urls';
 import { RunningQueryRegistry } from './runningQueries';
 
@@ -49,6 +49,25 @@ export class TrinoClient {
     }
 
     /**
+     * Tables and views in a schema, separated by type. SHOW TABLES lists both
+     * without distinguishing them, so information_schema is used when available
+     * and SHOW TABLES is the fallback for connectors that refuse it.
+     */
+    public async tableEntries(catalog: string, schema: string): Promise<TableEntry[]> {
+        try {
+            const result = await this.query(
+                `SELECT table_name, table_type FROM ${quoteIdentifier(catalog)}.information_schema.tables ` +
+                `WHERE table_schema = ${quoteLiteral(schema)} ORDER BY table_name`
+            );
+            const entries = result.rows
+                .map(row => ({ name: String(row[0] ?? ''), view: /VIEW/i.test(String(row[1] ?? '')) }))
+                .filter(entry => entry.name);
+            if (entries.length) { return entries; }
+        } catch { /* fall through to SHOW TABLES */ }
+        return (await this.tables(catalog, schema)).map(name => ({ name, view: false }));
+    }
+
+    /**
      * Table counts for every schema in a catalog, in a single query. Counting per
      * schema would mean one round trip per node, which is far too slow to expand.
      * Rows match what SHOW TABLES lists, so views are included in the count.
@@ -67,10 +86,10 @@ export class TrinoClient {
         return counts;
     }
 
-    /** SHOW CREATE TABLE returns the DDL as a single cell. */
-    public async tableDdl(catalog: string, schema: string, table: string, token?: vscode.CancellationToken): Promise<string> {
+    /** SHOW CREATE returns the DDL as a single cell; views need their own form. */
+    public async tableDdl(catalog: string, schema: string, table: string, view = false, token?: vscode.CancellationToken): Promise<string> {
         const qualified = `${quoteIdentifier(catalog)}.${quoteIdentifier(schema)}.${quoteIdentifier(table)}`;
-        const result = await this.query(`SHOW CREATE TABLE ${qualified}`, token);
+        const result = await this.query(`SHOW CREATE ${view ? 'VIEW' : 'TABLE'} ${qualified}`, token);
         return result.rows.map(row => String(row[0] ?? '')).join('\n').trim();
     }
 

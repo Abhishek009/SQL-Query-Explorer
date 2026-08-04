@@ -280,27 +280,27 @@
       "view/item/context": [
         {
           "command": "trino.previewTable",
-          "when": "view == trinoCatalogs && viewItem == trino.table",
+          "when": "view == trinoCatalogs && viewItem =~ /^trino\\.(table|view)$/",
           "group": "inline@1"
         },
         {
           "command": "trino.previewTable",
-          "when": "view == trinoCatalogs && viewItem == trino.table",
+          "when": "view == trinoCatalogs && viewItem =~ /^trino\\.(table|view)$/",
           "group": "1_table@1"
         },
         {
           "command": "trino.showTableDdl",
-          "when": "view == trinoCatalogs && viewItem == trino.table",
+          "when": "view == trinoCatalogs && viewItem =~ /^trino\\.(table|view)$/",
           "group": "1_table@2"
         },
         {
           "command": "trino.refreshNode",
-          "when": "view == trinoCatalogs && viewItem =~ /^trino\\.(catalog|schema|table)$/",
+          "when": "view == trinoCatalogs && viewItem =~ /^trino\\.(catalog|schema|table|view|group)/",
           "group": "inline@9"
         },
         {
           "command": "trino.refreshNode",
-          "when": "view == trinoCatalogs && viewItem =~ /^trino\\.(catalog|schema|table)$/",
+          "when": "view == trinoCatalogs && viewItem =~ /^trino\\.(catalog|schema|table|view|group)/",
           "group": "9_refresh@1"
         },
         {

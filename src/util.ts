@@ -21,6 +21,11 @@ export function quoteIdentifier(identifier: string): string {
     return `"${identifier.replace(/"/g, '""')}"`;
 }
 
+/** Single-quoted SQL string literal, for values rather than identifiers. */
+export function quoteLiteral(value: string): string {
+    return `'${value.replace(/'/g, "''")}'`;
+}
+
 export function clampRowLimit(value: number): number {
     return Math.min(Math.max(Math.trunc(value) || 1, 1), 10_000);
 }

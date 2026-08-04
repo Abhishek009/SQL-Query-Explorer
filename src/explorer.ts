@@ -1,10 +1,10 @@
 import * as vscode from 'vscode';
-import { StoredConnection, TrinoColumn } from './types';
+import { StoredConnection, TableEntry, TrinoColumn } from './types';
 import { ConnectionStore } from './connectionStore';
 import { TrinoClient } from './trinoClient';
 import { quoteIdentifier, showConnectionError } from './util';
 
-export type ExplorerNodeKind = 'connection' | 'catalog' | 'schema' | 'table' | 'column' | 'empty';
+export type ExplorerNodeKind = 'connection' | 'catalog' | 'schema' | 'group' | 'table' | 'column' | 'empty';
 
 /** Counting costs an extra metadata query, so it can be turned off. */
 function showTableCounts(): boolean {
@@ -15,6 +15,8 @@ export class TrinoExplorerProvider implements vscode.TreeDataProvider<ExplorerIt
     private readonly changed = new vscode.EventEmitter<ExplorerItem | undefined>();
     public readonly onDidChangeTreeData = this.changed.event;
     private readonly catalogsByConnection = new Map<string, string[]>();
+    /** Table and view listings per "connectionId/catalog/schema". */
+    private readonly entriesBySchema = new Map<string, TableEntry[]>();
     /** Table counts per "connectionId/catalog"; null when the lookup is unavailable. */
     private readonly countsByCatalog = new Map<string, Map<string, number> | null>();
 
@@ -51,8 +53,18 @@ export class TrinoExplorerProvider implements vscode.TreeDataProvider<ExplorerIt
                 ));
             }
             if (element.kind === 'schema' && element.catalog && element.schema) {
-                const tables = await client.tables(element.catalog, element.schema);
-                return tables.map(table => ExplorerItem.table(connection.id, element.catalog!, element.schema!, table));
+                const entries = await this.tableEntries(client, connection.id, element.catalog, element.schema);
+                return [
+                    ExplorerItem.group(connection.id, element.catalog, element.schema, 'tables', entries.filter(entry => !entry.view).length),
+                    ExplorerItem.group(connection.id, element.catalog, element.schema, 'views', entries.filter(entry => entry.view).length)
+                ];
+            }
+            if (element.kind === 'group' && element.catalog && element.schema && element.group) {
+                const wantViews = element.group === 'views';
+                const entries = await this.tableEntries(client, connection.id, element.catalog, element.schema);
+                return entries
+                    .filter(entry => entry.view === wantViews)
+                    .map(entry => ExplorerItem.table(connection.id, element.catalog!, element.schema!, entry.name, entry.view));
             }
             if (element.kind === 'table' && element.catalog && element.schema && element.table) {
                 const columns = await client.columns(element.catalog, element.schema, element.table);
@@ -62,6 +74,19 @@ export class TrinoExplorerProvider implements vscode.TreeDataProvider<ExplorerIt
             showConnectionError(error);
         }
         return [];
+    }
+
+    /**
+     * Cached because both group nodes and their children need the same listing;
+     * without it, expanding a schema and then its Tables folder queries twice.
+     */
+    private async tableEntries(client: TrinoClient, connectionId: string, catalog: string, schema: string): Promise<TableEntry[]> {
+        const key = `${connectionId}/${catalog}/${schema}`;
+        const cached = this.entriesBySchema.get(key);
+        if (cached) { return cached; }
+        const entries = await client.tableEntries(catalog, schema);
+        this.entriesBySchema.set(key, entries);
+        return entries;
     }
 
     /**
@@ -90,10 +115,11 @@ export class TrinoExplorerProvider implements vscode.TreeDataProvider<ExplorerIt
     public forget(id?: string): void {
         if (id) {
             this.catalogsByConnection.delete(id);
-            this.forgetCounts(`${id}/`);
+            this.forgetCached(`${id}/`);
         } else {
             this.catalogsByConnection.clear();
             this.countsByCatalog.clear();
+            this.entriesBySchema.clear();
         }
         this.refresh();
     }
@@ -107,14 +133,18 @@ export class TrinoExplorerProvider implements vscode.TreeDataProvider<ExplorerIt
      */
     public refreshItem(item: ExplorerItem): void {
         if (item.connectionId) {
-            this.forgetCounts(item.catalog ? `${item.connectionId}/${item.catalog}` : `${item.connectionId}/`);
+            const path = [item.connectionId, item.catalog, item.schema].filter(Boolean).join('/');
+            this.forgetCached(item.catalog ? path : `${item.connectionId}/`);
         }
         this.changed.fire(item);
     }
 
-    private forgetCounts(prefix: string): void {
+    private forgetCached(prefix: string): void {
         for (const key of [...this.countsByCatalog.keys()]) {
             if (key.startsWith(prefix)) { this.countsByCatalog.delete(key); }
+        }
+        for (const key of [...this.entriesBySchema.keys()]) {
+            if (key.startsWith(prefix)) { this.entriesBySchema.delete(key); }
         }
     }
 
@@ -173,7 +203,9 @@ export class ExplorerItem extends vscode.TreeItem {
         public readonly connectionId?: string,
         public readonly catalog?: string,
         public readonly schema?: string,
-        public readonly table?: string
+        public readonly table?: string,
+        /** Which folder a 'group' node stands for. */
+        public readonly group?: 'tables' | 'views'
     ) {
         super(label, kind === 'column' || kind === 'empty'
             ? vscode.TreeItemCollapsibleState.None
@@ -220,10 +252,24 @@ export class ExplorerItem extends vscode.TreeItem {
         return item;
     }
 
-    public static table(connectionId: string, catalog: string, schema: string, table: string): ExplorerItem {
+    public static group(connectionId: string, catalog: string, schema: string, group: 'tables' | 'views', count: number): ExplorerItem {
+        const label = group === 'tables' ? 'Tables' : 'Views';
+        const item = new ExplorerItem(`${label} (${count.toLocaleString()})`, 'group', connectionId, catalog, schema, undefined, group);
+        item.iconPath = new vscode.ThemeIcon(group === 'tables' ? 'symbol-structure' : 'eye');
+        item.tooltip = `${count.toLocaleString()} ${label.toLowerCase()} in ${catalog}.${schema}`;
+        item.contextValue = `trino.group.${group}`;
+        // Nothing to expand into, so do not offer an arrow that reveals nothing.
+        item.collapsibleState = count === 0
+            ? vscode.TreeItemCollapsibleState.None
+            : vscode.TreeItemCollapsibleState.Collapsed;
+        return item;
+    }
+
+    public static table(connectionId: string, catalog: string, schema: string, table: string, view = false): ExplorerItem {
         const item = new ExplorerItem(table, 'table', connectionId, catalog, schema, table);
-        item.description = 'TABLE';
-        item.iconPath = new vscode.ThemeIcon('list-flat');
+        item.description = view ? 'VIEW' : 'TABLE';
+        item.iconPath = new vscode.ThemeIcon(view ? 'eye' : 'list-flat');
+        item.contextValue = view ? 'trino.view' : 'trino.table';
         item.tooltip = `${catalog}.${schema}.${table}`;
         // Fires on every click; the handler previews only on a double click.
         item.command = { command: 'trino.tableClicked', title: 'Preview Table Data', arguments: [item] };

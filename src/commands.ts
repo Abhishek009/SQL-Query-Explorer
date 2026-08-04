@@ -89,10 +89,11 @@ export async function showTableDdl(
     const connection = store.get(item?.connectionId);
     if (!connection || !item?.catalog || !item.schema || !item.table) { return; }
     const qualified = `${quoteIdentifier(item.catalog)}.${quoteIdentifier(item.schema)}.${quoteIdentifier(item.table)}`;
+    const isView = item.contextValue === 'trino.view';
     try {
         const ddl = await vscode.window.withProgress(
             { location: vscode.ProgressLocation.Notification, title: `Fetching DDL for ${item.table}…`, cancellable: true },
-            (_, token) => new TrinoClient(secrets, connection, registry).tableDdl(item.catalog!, item.schema!, item.table!, token)
+            (_, token) => new TrinoClient(secrets, connection, registry).tableDdl(item.catalog!, item.schema!, item.table!, isView, token)
         );
         if (!ddl) {
             vscode.window.showWarningMessage(`Trino returned no DDL for ${item.catalog}.${item.schema}.${item.table}.`);
@@ -104,7 +105,7 @@ export async function showTableDdl(
         });
         await vscode.window.showTextDocument(document, { preview: false });
     } catch (error) {
-        await showQueryError(results, error, connection, `SHOW CREATE TABLE ${qualified}`);
+        await showQueryError(results, error, connection, `SHOW CREATE ${isView ? 'VIEW' : 'TABLE'} ${qualified}`);
     }
 }
 

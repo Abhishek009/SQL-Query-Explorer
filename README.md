@@ -33,11 +33,12 @@ Details:
 - JDBC-only parameters such as `SSLVerification`, `KerberosRemoteServiceName`, and `extraCredentials` are parsed but not yet applied.
 
 ### Explorer
-- Lazy hierarchy of **connection → catalog → schema → table → column**, fetched only when you expand a node.
+- Lazy hierarchy of **connection → catalog → schema → Tables/Views → table → column**, fetched only when you expand a node.
+- **Tables and views are grouped into folders** with counts, for example `Tables (10)` and `Views (3)`.
 - **Schemas show how many tables they contain**, from a single `information_schema` query per catalog.
 - **Columns show their data type** beside the name, with comments and the fully-qualified name on hover.
 - **Double-click a table** to preview its rows, or use the inline preview icon / context menu for a single click.
-- **Right-click a table → Show Table DDL** to open its `SHOW CREATE TABLE` output in a SQL editor.
+- **Right-click a table or view → Show Table DDL** to open its `SHOW CREATE TABLE` / `SHOW CREATE VIEW` output in a SQL editor.
 
 ### SQL editor and execution
 - **Trino: New SQL Query** opens a native VS Code SQL editor, so normal editing, syntax highlighting, and GitHub Copilot all work.
