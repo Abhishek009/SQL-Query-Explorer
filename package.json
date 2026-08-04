@@ -157,6 +157,11 @@
           "maximum": 1000000,
           "markdownDescription": "Maximum rows fetched from Trino for any statement. The extension stops paging and cancels the query once this many rows have arrived, which bounds memory for queries without a `LIMIT`. A connection can override this in its own settings."
         },
+        "trino.explorer.showTableCounts": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show the number of tables beside each schema in the Connections view. This runs one extra `information_schema` query per catalog, which can be slow on very large catalogs."
+        },
         "trino.preview.rowLimit": {
           "type": "number",
           "default": 100,

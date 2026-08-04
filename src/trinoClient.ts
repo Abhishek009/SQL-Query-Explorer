@@ -48,6 +48,25 @@ export class TrinoClient {
         })).filter(column => column.name);
     }
 
+    /**
+     * Table counts for every schema in a catalog, in a single query. Counting per
+     * schema would mean one round trip per node, which is far too slow to expand.
+     * Rows match what SHOW TABLES lists, so views are included in the count.
+     */
+    public async tableCountsBySchema(catalog: string, token?: vscode.CancellationToken): Promise<Map<string, number>> {
+        const result = await this.query(
+            `SELECT table_schema, COUNT(*) FROM ${quoteIdentifier(catalog)}.information_schema.tables GROUP BY table_schema`,
+            token
+        );
+        const counts = new Map<string, number>();
+        for (const row of result.rows) {
+            const schema = String(row[0] ?? '');
+            const count = Number(row[1]);
+            if (schema && Number.isFinite(count)) { counts.set(schema, count); }
+        }
+        return counts;
+    }
+
     /** SHOW CREATE TABLE returns the DDL as a single cell. */
     public async tableDdl(catalog: string, schema: string, table: string, token?: vscode.CancellationToken): Promise<string> {
         const qualified = `${quoteIdentifier(catalog)}.${quoteIdentifier(schema)}.${quoteIdentifier(table)}`;

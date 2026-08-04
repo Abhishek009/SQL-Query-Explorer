@@ -6,10 +6,17 @@ import { quoteIdentifier, showConnectionError } from './util';
 
 export type ExplorerNodeKind = 'connection' | 'catalog' | 'schema' | 'table' | 'column' | 'empty';
 
+/** Counting costs an extra metadata query, so it can be turned off. */
+function showTableCounts(): boolean {
+    return vscode.workspace.getConfiguration('trino').get<boolean>('explorer.showTableCounts') ?? true;
+}
+
 export class TrinoExplorerProvider implements vscode.TreeDataProvider<ExplorerItem> {
     private readonly changed = new vscode.EventEmitter<ExplorerItem | undefined>();
     public readonly onDidChangeTreeData = this.changed.event;
     private readonly catalogsByConnection = new Map<string, string[]>();
+    /** Table counts per "connectionId/catalog"; null when the lookup is unavailable. */
+    private readonly countsByCatalog = new Map<string, Map<string, number> | null>();
 
     public constructor(private readonly store: ConnectionStore, private readonly secrets: vscode.SecretStorage) {}
 
@@ -36,7 +43,12 @@ export class TrinoExplorerProvider implements vscode.TreeDataProvider<ExplorerIt
             }
             if (element.kind === 'catalog' && element.catalog) {
                 const schemas = await client.schemas(element.catalog);
-                return schemas.map(schema => ExplorerItem.schema(connection.id, element.catalog!, schema));
+                const counts = await this.tableCounts(client, connection.id, element.catalog);
+                // A schema absent from the counts has no tables at all, which is
+                // different from the counts being unavailable for the catalog.
+                return schemas.map(schema => ExplorerItem.schema(
+                    connection.id, element.catalog!, schema, counts && (counts.get(schema) ?? 0)
+                ));
             }
             if (element.kind === 'schema' && element.catalog && element.schema) {
                 const tables = await client.tables(element.catalog, element.schema);
@@ -52,6 +64,22 @@ export class TrinoExplorerProvider implements vscode.TreeDataProvider<ExplorerIt
         return [];
     }
 
+    /**
+     * Best effort: information_schema can be slow or restricted on some connectors,
+     * so a failure just means schemas are shown without a count. The empty result
+     * is cached too, otherwise every expand would retry a query known to fail.
+     */
+    private async tableCounts(client: TrinoClient, connectionId: string, catalog: string): Promise<Map<string, number> | undefined> {
+        if (!showTableCounts()) { return undefined; }
+        const key = `${connectionId}/${catalog}`;
+        if (this.countsByCatalog.has(key)) { return this.countsByCatalog.get(key) ?? undefined; }
+        let counts: Map<string, number> | null = null;
+        try { counts = await client.tableCountsBySchema(catalog); }
+        catch { /* leave the counts off rather than failing the expand */ }
+        this.countsByCatalog.set(key, counts);
+        return counts ?? undefined;
+    }
+
     /** Loads and caches a connection's catalogs, marking it connected in the tree. */
     public async connect(connection: StoredConnection): Promise<void> {
         const client = new TrinoClient(this.secrets, connection);
@@ -60,7 +88,13 @@ export class TrinoExplorerProvider implements vscode.TreeDataProvider<ExplorerIt
     }
 
     public forget(id?: string): void {
-        if (id) { this.catalogsByConnection.delete(id); } else { this.catalogsByConnection.clear(); }
+        if (id) {
+            this.catalogsByConnection.delete(id);
+            this.forgetCounts(`${id}/`);
+        } else {
+            this.catalogsByConnection.clear();
+            this.countsByCatalog.clear();
+        }
         this.refresh();
     }
 
@@ -68,9 +102,21 @@ export class TrinoExplorerProvider implements vscode.TreeDataProvider<ExplorerIt
 
     /**
      * Redraws one branch. Schemas, tables, and columns are fetched on expand and
-     * never cached here, so firing for the node is enough to re-query it.
+     * never cached here, so firing for the node is enough to re-query it. Table
+     * counts are cached, so drop them for the branch being refreshed.
      */
-    public refreshItem(item: ExplorerItem): void { this.changed.fire(item); }
+    public refreshItem(item: ExplorerItem): void {
+        if (item.connectionId) {
+            this.forgetCounts(item.catalog ? `${item.connectionId}/${item.catalog}` : `${item.connectionId}/`);
+        }
+        this.changed.fire(item);
+    }
+
+    private forgetCounts(prefix: string): void {
+        for (const key of [...this.countsByCatalog.keys()]) {
+            if (key.startsWith(prefix)) { this.countsByCatalog.delete(key); }
+        }
+    }
 
     private async loadCatalogs(client: TrinoClient, connection: StoredConnection): Promise<string[]> {
         const catalogs = await vscode.window.withProgress(
@@ -162,10 +208,15 @@ export class ExplorerItem extends vscode.TreeItem {
         return item;
     }
 
-    public static schema(connectionId: string, catalog: string, schema: string): ExplorerItem {
+    public static schema(connectionId: string, catalog: string, schema: string, tableCount?: number): ExplorerItem {
         const item = new ExplorerItem(schema, 'schema', connectionId, catalog, schema);
-        item.iconPath = new vscode.ThemeIcon('symbol-namespace');
-        item.tooltip = `Schema: ${catalog}.${schema}`;
+        item.iconPath = new vscode.ThemeIcon('folder-library');
+        if (tableCount !== undefined) {
+            item.description = tableCount === 1 ? '1 table' : `${tableCount.toLocaleString()} tables`;
+        }
+        item.tooltip = new vscode.MarkdownString(
+            `**${schema}**\n\n${catalog}.${schema}${tableCount === undefined ? '' : `\n\n${tableCount.toLocaleString()} table(s)`}`
+        );
         return item;
     }
 
