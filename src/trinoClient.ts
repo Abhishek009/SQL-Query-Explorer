@@ -5,6 +5,21 @@ import { describeFetchFailure, firstColumn, quoteIdentifier, quoteLiteral, summa
 import { httpBaseUrl } from './urls';
 import { RunningQueryRegistry } from './runningQueries';
 
+/**
+ * Copies a page into the accumulator, stopping at the cap. Written as a loop
+ * because `rows.push(...page)` applies the page as arguments, which overflows
+ * the call stack once a single page carries a few hundred thousand rows.
+ * Returns true when rows had to be dropped.
+ */
+function appendRows(target: unknown[][], source: unknown[][] | undefined, limit: number): boolean {
+    if (!source?.length) { return false; }
+    for (let index = 0; index < source.length; index++) {
+        if (target.length >= limit) { return true; }
+        target.push(source[index]);
+    }
+    return false;
+}
+
 /** How long to wait for the query URI before abandoning a cancel attempt. */
 const CANCEL_URI_WAIT_MS = 3_000;
 
@@ -144,10 +159,10 @@ export class TrinoClient {
             let page = await this.readPage(response);
             live.nextUri = page.nextUri;
             if (entry) { this.registry?.setQueryId(entry.id, page.id); }
-            const rows = [...(page.data ?? [])];
-            let columns = page.columns;
             const maxRows = this.maxRows();
-            let truncated = false;
+            const rows: unknown[][] = [];
+            let truncated = appendRows(rows, page.data, maxRows);
+            let columns = page.columns;
             while (page.nextUri && !page.error) {
                 if (rows.length >= maxRows) {
                     // Stop pulling pages and tell the coordinator to abandon the query,
@@ -160,7 +175,7 @@ export class TrinoClient {
                 response = await this.request(page.nextUri, { method: 'GET', headers, signal: token, abort });
                 page = await this.readPage(response);
                 live.nextUri = page.nextUri;
-                rows.push(...(page.data ?? []));
+                if (appendRows(rows, page.data, maxRows)) { truncated = true; }
                 columns ??= page.columns;
             }
             if (page.error) {
@@ -168,10 +183,6 @@ export class TrinoClient {
                     page.error.message || page.error.errorName || 'Trino returned an error.',
                     JSON.stringify(page.error, null, 2)
                 );
-            }
-            if (rows.length > maxRows) {
-                rows.length = maxRows;
-                truncated = true;
             }
             return { columns: (columns ?? []).map(column => column.name), rows, truncated, maxRows };
         } finally {
