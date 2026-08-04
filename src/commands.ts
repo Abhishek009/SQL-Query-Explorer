@@ -4,7 +4,7 @@ import { ErrorState, ResultsState, StoredConnection, TrinoQueryResult, TrinoRequ
 import { ConnectionStore, passwordKey } from './connectionStore';
 import { TrinoClient } from './trinoClient';
 import { ExplorerItem, TrinoExplorerProvider, qualifiedName } from './explorer';
-import { ResultsViewProvider } from './resultsView';
+import { ResultsSurface, ResultsTabs } from './resultsView';
 import { QueryStatusProvider } from './queryStatus';
 import { RunningQueryRegistry } from './runningQueries';
 import { ConnectionMessage, connectionFormHtml, expandPastedUrl, isConnectionMessage, parseMaxRows, validateConnection } from './connectionForm';
@@ -51,9 +51,10 @@ export function isDoubleClick(key: string): boolean {
 }
 
 /** Runs a bounded SELECT for the clicked table and shows it in the results grid. */
-export async function previewTable(store: ConnectionStore, secrets: vscode.SecretStorage, results: ResultsViewProvider, registry: RunningQueryRegistry, item?: ExplorerItem, force = false): Promise<void> {
+export async function previewTable(store: ConnectionStore, secrets: vscode.SecretStorage, tabs: ResultsTabs, registry: RunningQueryRegistry, item?: ExplorerItem, force = false): Promise<void> {
     const connection = store.get(item?.connectionId);
     if (!connection || !item?.catalog || !item.schema || !item.table) { return; }
+    const results = tabs.primary(`${item.schema}.${item.table}`);
     if (!force && !isDoubleClick(`${connection.id}/${item.catalog}/${item.schema}/${item.table}`)) { return; }
     const qualified = `${quoteIdentifier(item.catalog)}.${quoteIdentifier(item.schema)}.${quoteIdentifier(item.table)}`;
     const limit = previewRowLimit();
@@ -82,12 +83,13 @@ export async function previewTable(store: ConnectionStore, secrets: vscode.Secre
 export async function showTableDdl(
     store: ConnectionStore,
     secrets: vscode.SecretStorage,
-    results: ResultsViewProvider,
+    tabs: ResultsTabs,
     registry: RunningQueryRegistry,
     item?: ExplorerItem
 ): Promise<void> {
     const connection = store.get(item?.connectionId);
     if (!connection || !item?.catalog || !item.schema || !item.table) { return; }
+    const results = tabs.primary(`${item.schema}.${item.table}`);
     const qualified = `${quoteIdentifier(item.catalog)}.${quoteIdentifier(item.schema)}.${quoteIdentifier(item.table)}`;
     const isView = item.contextValue === 'trino.view';
     try {
@@ -142,7 +144,7 @@ export async function openSqlQueryEditor(store: ConnectionStore): Promise<void> 
     await vscode.window.showTextDocument(document, { preview: false });
 }
 
-export async function runActiveSql(store: ConnectionStore, secrets: vscode.SecretStorage, status: QueryStatusProvider, results: ResultsViewProvider, registry: RunningQueryRegistry): Promise<void> {
+export async function runActiveSql(store: ConnectionStore, secrets: vscode.SecretStorage, status: QueryStatusProvider, tabs: ResultsTabs, registry: RunningQueryRegistry): Promise<void> {
     const editor = vscode.window.activeTextEditor;
     if (!editor || editor.document.languageId !== 'sql') {
         vscode.window.showErrorMessage('Open a Trino SQL query editor before running a query.');
@@ -153,7 +155,7 @@ export async function runActiveSql(store: ConnectionStore, secrets: vscode.Secre
     // Anchor the timing above the statement that ran: the selection, or the
     // first non-empty line when the whole editor is executed.
     const line = selectedSql ? editor.selection.start.line : firstStatementLine(editor.document);
-    await executeSql({ store, secrets, status, registry, surface: results, sql, line, uri: editor.document.uri });
+    await executeSql({ store, secrets, status, registry, surface: tabs.primary(tabTitle(sql)), sql, line, uri: editor.document.uri });
 }
 
 export interface ExecuteRequest {
@@ -162,16 +164,10 @@ export interface ExecuteRequest {
     status: QueryStatusProvider;
     registry: RunningQueryRegistry;
     /** Where the grid is drawn: the shared panel, or a dedicated tab. */
-    surface: ResultsSurfaceLike;
+    surface: ResultsSurface;
     sql: string;
     line: number;
     uri: vscode.Uri;
-}
-
-/** Anything that can draw a results grid: the panel view or a tab panel. */
-export interface ResultsSurfaceLike {
-    showResults(state: ResultsState): Promise<void>;
-    showError(state: ErrorState): Promise<void>;
 }
 
 /** One execution path for every entry point, so timing and errors stay uniform. */
@@ -212,11 +208,14 @@ export async function runStatement(
     store: ConnectionStore,
     secrets: vscode.SecretStorage,
     status: QueryStatusProvider,
-    surface: ResultsViewProvider,
+    tabs: ResultsTabs,
     registry: RunningQueryRegistry,
-    args?: { uri?: string; sql?: string; line?: number }
+    args?: { uri?: string; sql?: string; line?: number },
+    newTab = false
 ): Promise<void> {
     if (!args?.sql || !args.uri) { return; }
+    const title = tabTitle(args.sql);
+    const surface = newTab ? tabs.additional(title) : tabs.primary(title);
     await executeSql({
         store, secrets, status, registry, surface,
         sql: args.sql, line: args.line ?? 0, uri: vscode.Uri.parse(args.uri)
@@ -228,8 +227,10 @@ export function tabTitle(sql: string): string {
     // A qualified name whose parts may be quoted, so "order details" survives.
     const part = '(?:"(?:[^"]|"")*"|[A-Za-z0-9_$]+)';
     const from = new RegExp(`\\bfrom\\s+(${part}(?:\\.${part})*)`, 'i').exec(sql)?.[1];
-    const last = from?.match(new RegExp(part, 'g'))?.pop()?.replace(/^"|"$/g, '').replace(/""/g, '"');
-    return last ? `Results: ${last}` : 'Trino Results';
+    const parts = from?.match(new RegExp(part, 'g'))
+        ?.map(name => name.replace(/^"|"$/g, '').replace(/""/g, '"')) ?? [];
+    // The last two levels identify the table without the noise of the catalog.
+    return parts.length ? parts.slice(-2).join('.') : 'Trino Results';
 }
 
 export function firstStatementLine(document: vscode.TextDocument): number {
@@ -241,7 +242,7 @@ export function firstStatementLine(document: vscode.TextDocument): number {
 }
 
 export async function showSqlResults(
-    results: ResultsViewProvider,
+    results: ResultsSurface,
     result: TrinoQueryResult,
     connection: StoredConnection,
     query: { sql: string; milliseconds: number },
@@ -319,7 +320,7 @@ export async function showConnectionWindow(
 }
 
 /** Failures land in the same panel as results, with the full server response. */
-export async function showQueryError(results: ResultsViewProvider, error: unknown, connection: StoredConnection, sql: string): Promise<void> {
+export async function showQueryError(results: ResultsSurface, error: unknown, connection: StoredConnection, sql: string): Promise<void> {
     await results.showError({
         connection,
         sql,

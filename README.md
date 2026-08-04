@@ -42,14 +42,14 @@ Details:
 
 ### SQL editor and execution
 - **Trino: New SQL Query** opens a native VS Code SQL editor, so normal editing, syntax highlighting, and GitHub Copilot all work.
-- **Run / Side actions above every statement** — `Run` sends results to the Trino Results panel; `Side` sends them to the **Results (Side)** view, which you can drag into the Secondary Side Bar to keep results beside your editor.
+- **Run / New Tab actions above every statement** — `Run` reuses a single results tab, so repeated runs replace it in place; `New Tab` opens a separate tab that later runs leave alone. Tabs are named after the table, e.g. `sf1.customer`.
 - **Trino: Run SQL Query** from the editor title bar or `Cmd+Enter` / `Ctrl+Enter`. If text is selected only the selection runs; otherwise the whole editor runs.
 - **Autocomplete from live metadata** — typing `tpch.` suggests schemas, `tpch.sf1.` suggests tables, and `tpch.sf1.customer.` suggests columns with their types. Results are cached briefly and refresh with the connection.
 - **Execution feedback in the editor**: a timing line above the statement (`✓ 619ms · 1,500 row(s)`) plus a green tick or red cross in the gutter.
 - Long-running statements show a cancellable progress indicator and abort the underlying request when cancelled.
 
-### Results panel
-Results open in a **Trino Results** tab beside Terminal and Output, not in an editor tab.
+### Results
+Results open in an editor tab beside your query. `Run` reuses one tab; `New Tab` opens another so results can be compared side by side.
 
 - **Sortable columns** — click a header to cycle ascending → descending → unsorted. Numbers sort numerically, text case-insensitively, and NULLs always sort last.
 - **Resizable columns** — drag a header edge; double-click it to reset.
@@ -78,6 +78,8 @@ Queries without a `LIMIT` could otherwise pull an entire table into memory. The 
 | `New Query Here` | Open a SQL editor scoped to the selected node. |
 | `Trino: Refresh Catalogs` | Reload the tree and clear cached metadata. |
 | `Trino: Cancel Running Query` | Stop a running query on the coordinator. |
+| `Trino: Run Statement` | Run one statement into the shared results tab. |
+| `Trino: Run Statement in New Tab` | Run one statement into its own results tab. |
 
 ### Settings
 

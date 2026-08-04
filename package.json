@@ -112,9 +112,9 @@
         "icon": "$(play)"
       },
       {
-        "command": "trino.runStatementInSide",
-        "title": "Trino: Run Statement in Side View",
-        "icon": "$(layout-sidebar-right)"
+        "command": "trino.runStatementNewTab",
+        "title": "Trino: Run Statement in New Tab",
+        "icon": "$(split-horizontal)"
       }
     ],
     "configuration": {
@@ -213,13 +213,6 @@
           "title": "Trino",
           "icon": "resources/trino.svg"
         }
-      ],
-      "panel": [
-        {
-          "id": "trinoResults",
-          "title": "Trino Results",
-          "icon": "resources/trino.svg"
-        }
       ]
     },
     "views": {
@@ -229,23 +222,6 @@
           "name": "Connections",
           "icon": "resources/trino.svg",
           "contextualTitle": "Trino"
-        },
-        {
-          "id": "trinoResultsSideView",
-          "name": "Results (Side)",
-          "type": "webview",
-          "icon": "resources/trino.svg",
-          "contextualTitle": "Trino Results",
-          "visibility": "collapsed"
-        }
-      ],
-      "trinoResults": [
-        {
-          "id": "trinoResultsView",
-          "name": "Results",
-          "type": "webview",
-          "icon": "resources/trino.svg",
-          "contextualTitle": "Trino Results"
         }
       ]
     },
@@ -286,7 +262,7 @@
           "when": "false"
         },
         {
-          "command": "trino.runStatementInSide",
+          "command": "trino.runStatementNewTab",
           "when": "false"
         }
       ],

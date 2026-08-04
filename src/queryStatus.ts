@@ -81,9 +81,9 @@ export class QueryStatusProvider implements vscode.CodeLensProvider, vscode.Disp
                 arguments: args
             }));
             lenses.push(new vscode.CodeLens(range, {
-                title: '$(layout-sidebar-right) Side',
-                tooltip: 'Run this statement and show the results in the side view, which can be docked in the Secondary Side Bar',
-                command: 'trino.runStatementInSide',
+                title: '$(split-horizontal) New Tab',
+                tooltip: 'Run this statement in a new results tab, leaving earlier results open',
+                command: 'trino.runStatementNewTab',
                 arguments: args
             }));
         }

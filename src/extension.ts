@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { ConnectionStore } from './connectionStore';
 import { TrinoExplorerProvider, ExplorerDragController, ExplorerItem } from './explorer';
-import { ResultsViewProvider } from './resultsView';
+import { ResultsTabs } from './resultsView';
 import { QueryStatusProvider } from './queryStatus';
 import { SqlCompletionProvider } from './completion';
 import { openScopedQuery, openSqlQueryEditor, pickConnection, previewTable, resolveConnection, runActiveSql, runStatement, showConnectionWindow, showTableDdl } from './commands';
@@ -12,8 +12,7 @@ export function activate(context: vscode.ExtensionContext): void {
     const store = new ConnectionStore(context);
     const provider = new TrinoExplorerProvider(store, context.secrets);
     const status = new QueryStatusProvider(context);
-    const results = new ResultsViewProvider(ResultsViewProvider.panelViewId);
-    const sideResults = new ResultsViewProvider(ResultsViewProvider.sideViewId);
+    const tabs = new ResultsTabs();
     const completions = new SqlCompletionProvider(store, context.secrets);
     const running = new RunningQueryRegistry();
     void store.migrateLegacyConnection();
@@ -30,12 +29,7 @@ export function activate(context: vscode.ExtensionContext): void {
             canSelectMany: true,
             showCollapseAll: true
         }),
-        vscode.window.registerWebviewViewProvider(results.viewId, results, {
-            webviewOptions: { retainContextWhenHidden: true }
-        }),
-        vscode.window.registerWebviewViewProvider(sideResults.viewId, sideResults, {
-            webviewOptions: { retainContextWhenHidden: true }
-        }),
+        tabs,
         vscode.languages.registerCodeLensProvider({ language: 'sql' }, status),
         vscode.workspace.onDidCloseTextDocument(document => status.forget(document.uri)),
         // Reapply after a split, tab switch, or reopen; decorations are per editor.
@@ -109,44 +103,26 @@ export function activate(context: vscode.ExtensionContext): void {
         await showConnectionWindow(context, store, provider, connection);
     });
     register('trino.previewTable', async (item?: ExplorerItem) => {
-        await previewTable(store, context.secrets, results, running, item, true);
+        await previewTable(store, context.secrets, tabs, running, item, true);
     });
     register('trino.tableClicked', async (item?: ExplorerItem) => {
-        await previewTable(store, context.secrets, results, running, item);
+        await previewTable(store, context.secrets, tabs, running, item);
     });
     register('trino.newQueryHere', async (item?: ExplorerItem) => {
         await openScopedQuery(store, item);
     });
     register('trino.showTableDdl', async (item?: ExplorerItem) => {
-        await showTableDdl(store, context.secrets, results, running, item);
+        await showTableDdl(store, context.secrets, tabs, running, item);
     });
     register('trino.openQuery', async () => { await openSqlQueryEditor(store); });
-    register('trino.runActiveSql', async () => { await runActiveSql(store, context.secrets, status, results, running); });
+    register('trino.runActiveSql', async () => { await runActiveSql(store, context.secrets, status, tabs, running); });
     register('trino.runStatement', async (args?: { uri?: string; sql?: string; line?: number }) => {
-        await runStatement(store, context.secrets, status, results, running, args);
+        await runStatement(store, context.secrets, status, tabs, running, args);
     });
-    register('trino.runStatementInSide', async (args?: { uri?: string; sql?: string; line?: number }) => {
-        await runStatement(store, context.secrets, status, sideResults, running, args);
-        await hintSecondarySideBar(context);
+    register('trino.runStatementNewTab', async (args?: { uri?: string; sql?: string; line?: number }) => {
+        await runStatement(store, context.secrets, status, tabs, running, args, true);
     });
     register('trino.cancelQuery', async () => { await cancelRunningQuery(running); });
-}
-
-/**
- * No extension can place a view in the Secondary Side Bar, so say once that the
- * user can drag it there. VS Code then remembers the location permanently.
- */
-async function hintSecondarySideBar(context: vscode.ExtensionContext): Promise<void> {
-    const key = 'trino.sideResultsHintShown';
-    if (context.globalState.get<boolean>(key)) { return; }
-    await context.globalState.update(key, true);
-    const choice = await vscode.window.showInformationMessage(
-        'Results opened in the "Trino Results (Side)" view. Drag it into the Secondary Side Bar to keep it beside your editor — VS Code will remember the position.',
-        'Show Secondary Side Bar'
-    );
-    if (choice) {
-        await vscode.commands.executeCommand('workbench.action.toggleAuxiliaryBar');
-    }
 }
 
 export function deactivate(): void {}

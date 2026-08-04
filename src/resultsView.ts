@@ -9,7 +9,7 @@ import { clampRowLimit } from './util';
  * of whether it is drawn in the bottom panel or in an editor tab. Subclasses
  * only supply the webview and how to bring it into view.
  */
-abstract class ResultsSurface {
+export abstract class ResultsSurface {
     protected results: ResultsState | undefined;
     protected failure: ErrorState | undefined;
 
@@ -94,32 +94,62 @@ abstract class ResultsSurface {
     }
 }
 
-/**
- * A results grid bound to a contributed view. Two exist: the shared one in the
- * bottom panel, and a second that can be parked in the Secondary Side Bar.
- */
-export class ResultsViewProvider extends ResultsSurface implements vscode.WebviewViewProvider {
-    public static readonly panelViewId = 'trinoResultsView';
-    public static readonly sideViewId = 'trinoResultsSideView';
-    private view: vscode.WebviewView | undefined;
+/** A results grid in its own editor tab. */
+export class ResultsTabPanel extends ResultsSurface {
+    private panel: vscode.WebviewPanel | undefined;
+    private title = 'Trino Results';
 
-    public constructor(public readonly viewId: string = ResultsViewProvider.panelViewId) { super(); }
+    protected webview(): vscode.Webview | undefined { return this.panel?.webview; }
 
-    public resolveWebviewView(view: vscode.WebviewView): void {
-        this.view = view;
-        view.webview.options = { enableScripts: true };
-        view.webview.onDidReceiveMessage((message: unknown) => void this.handle(message));
-        this.paint();
-        view.onDidDispose(() => { this.view = undefined; });
+    /** Names the tab after the query, so several results stay tellable apart. */
+    public retitle(title: string): void {
+        this.title = title;
+        if (this.panel) { this.panel.title = title; }
     }
 
-    protected webview(): vscode.Webview | undefined { return this.view?.webview; }
-
     protected async reveal(): Promise<void> {
-        if (!this.view) {
-            // Focusing the view forces VS Code to construct it, which resolves it above.
-            await vscode.commands.executeCommand(`${this.viewId}.focus`, { preserveFocus: true });
+        if (!this.panel) {
+            this.panel = vscode.window.createWebviewPanel(
+                'trinoResults',
+                this.title,
+                // Keep the caret in the editor so its timing CodeLens redraws at once.
+                { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
+                { enableScripts: true, retainContextWhenHidden: true }
+            );
+            this.panel.webview.onDidReceiveMessage((message: unknown) => void this.handle(message));
+            this.panel.onDidDispose(() => { this.panel = undefined; });
+        } else {
+            this.panel.reveal(undefined, true);
         }
-        this.view?.show(true);
+    }
+
+    public dispose(): void { this.panel?.dispose(); }
+}
+
+/**
+ * Owns the results tabs. Ordinary runs reuse one tab so results do not pile up;
+ * "Side" mints a separate tab that later runs will not overwrite.
+ */
+export class ResultsTabs implements vscode.Disposable {
+    private shared: ResultsTabPanel | undefined;
+    private readonly extras: ResultsTabPanel[] = [];
+
+    /** The reusable tab, recreated if the user closed it. */
+    public primary(title: string): ResultsTabPanel {
+        if (!this.shared) { this.shared = new ResultsTabPanel(); }
+        this.shared.retitle(title);
+        return this.shared;
+    }
+
+    public additional(title: string): ResultsTabPanel {
+        const panel = new ResultsTabPanel();
+        panel.retitle(title);
+        this.extras.push(panel);
+        return panel;
+    }
+
+    public dispose(): void {
+        this.shared?.dispose();
+        for (const panel of this.extras) { panel.dispose(); }
     }
 }
