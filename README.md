@@ -35,7 +35,6 @@ Details:
 ### Explorer
 - Lazy hierarchy of **connection → catalog → schema → Tables/Views → table → column**, fetched only when you expand a node.
 - **Tables and views are grouped into folders** with counts, for example `Tables (10)` and `Views (3)`.
-- **Schemas show how many tables they contain**, from a single `information_schema` query per catalog.
 - **Columns show their data type** beside the name, with comments and the fully-qualified name on hover.
 - **Double-click a table** to preview its rows, or use the inline preview icon / context menu for a single click.
 - **Right-click a table or view → Show Table DDL** to open its `SHOW CREATE TABLE` / `SHOW CREATE VIEW` output in a SQL editor.
@@ -84,7 +83,6 @@ Queries without a `LIMIT` could otherwise pull an entire table into memory. The 
 | `trino.connections` | `[]` | Saved connections. Managed by the Connections view; passwords are kept in Secret Storage, not here. |
 | `trino.query.maxRows` | `10000` | Hard cap on rows fetched for any statement. A connection can override it. |
 | `trino.preview.rowLimit` | `100` | Rows shown in the results grid, and fetched for a table preview. |
-| `trino.explorer.showTableCounts` | `true` | Show the table count beside each schema. Turn off on very large catalogs. |
 
 The older `trino.connection.*` settings are deprecated. Existing values are migrated into `trino.connections` automatically on first run.
 
