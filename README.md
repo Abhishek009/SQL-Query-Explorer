@@ -37,6 +37,7 @@ Details:
 - **Tables and views are grouped into folders** with counts, for example `Tables (10)` and `Views (3)`.
 - **Columns show their data type** beside the name, with comments and the fully-qualified name on hover.
 - **Double-click a table** to preview its rows, or use the inline preview icon / context menu for a single click.
+- **New Query Here** — hover a catalog, schema, table, or view and click the new-file icon to open a SQL editor already scoped to it, with that connection made active.
 - **Right-click a table or view → Show Table DDL** to open its `SHOW CREATE TABLE` / `SHOW CREATE VIEW` output in a SQL editor.
 
 ### SQL editor and execution
@@ -73,6 +74,7 @@ Queries without a `LIMIT` could otherwise pull an entire table into memory. The 
 | `Trino: Run SQL Query` | Execute the selection, or the whole editor if nothing is selected. |
 | `Trino: Preview Table Data` | Run a bounded `SELECT` against the selected table. |
 | `Trino: Show Table DDL` | Open `SHOW CREATE TABLE` output for the selected table. |
+| `New Query Here` | Open a SQL editor scoped to the selected node. |
 | `Trino: Refresh Catalogs` | Reload the tree and clear cached metadata. |
 | `Trino: Cancel Running Query` | Stop a running query on the coordinator. |
 

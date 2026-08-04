@@ -3,7 +3,7 @@ import { randomUUID } from 'crypto';
 import { ResultsState, StoredConnection, TrinoQueryResult, TrinoRequestError } from './types';
 import { ConnectionStore, passwordKey } from './connectionStore';
 import { TrinoClient } from './trinoClient';
-import { ExplorerItem, TrinoExplorerProvider } from './explorer';
+import { ExplorerItem, TrinoExplorerProvider, qualifiedName } from './explorer';
 import { ResultsViewProvider } from './resultsView';
 import { QueryStatusProvider } from './queryStatus';
 import { RunningQueryRegistry } from './runningQueries';
@@ -107,6 +107,29 @@ export async function showTableDdl(
     } catch (error) {
         await showQueryError(results, error, connection, `SHOW CREATE ${isView ? 'VIEW' : 'TABLE'} ${qualified}`);
     }
+}
+
+/**
+ * Opens a SQL editor already scoped to the node it was launched from, and makes
+ * that node's connection active so Cmd+Enter runs against the right coordinator.
+ */
+export async function openScopedQuery(store: ConnectionStore, item?: ExplorerItem): Promise<void> {
+    const connection = store.get(item?.connectionId);
+    if (!connection || !item) { return; }
+    await store.setActive(connection.id);
+
+    const scope = qualifiedName(item);
+    const body = item.kind === 'table'
+        ? `SELECT *\nFROM ${scope}\nLIMIT ${previewRowLimit()};\n`
+        // Ends on the dot so completion offers the next level straight away.
+        : scope ? `SELECT *\nFROM ${scope}.` : '';
+    const document = await vscode.workspace.openTextDocument({
+        language: 'sql',
+        content: `-- Connection: ${connection.name}\n\n${body}`
+    });
+    const editor = await vscode.window.showTextDocument(document, { preview: false });
+    const end = document.lineAt(document.lineCount - 1).range.end;
+    editor.selection = new vscode.Selection(end, end);
 }
 
 export async function openSqlQueryEditor(store: ConnectionStore): Promise<void> {

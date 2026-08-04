@@ -100,6 +100,11 @@
         "command": "trino.refreshNode",
         "title": "Refresh",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "trino.newQueryHere",
+        "title": "New Query Here",
+        "icon": "$(new-file)"
       }
     ],
     "configuration": {
@@ -253,6 +258,10 @@
         {
           "command": "trino.refreshNode",
           "when": "false"
+        },
+        {
+          "command": "trino.newQueryHere",
+          "when": "false"
         }
       ],
       "view/title": [
@@ -287,6 +296,16 @@
           "command": "trino.showTableDdl",
           "when": "view == trinoCatalogs && viewItem =~ /^trino\\.(table|view)$/",
           "group": "1_table@2"
+        },
+        {
+          "command": "trino.newQueryHere",
+          "when": "view == trinoCatalogs && viewItem =~ /^trino\\.(catalog|schema|table|view)$/",
+          "group": "inline@5"
+        },
+        {
+          "command": "trino.newQueryHere",
+          "when": "view == trinoCatalogs && viewItem =~ /^trino\\.(catalog|schema|table|view)$/",
+          "group": "1_table@0"
         },
         {
           "command": "trino.refreshNode",
