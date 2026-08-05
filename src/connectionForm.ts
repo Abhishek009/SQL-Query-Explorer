@@ -3,24 +3,28 @@ import { parseTrinoUrl, splitHostPort } from './urls';
 
 export interface ConnectionFormData {
     name: string;
+    engine: 'trino' | 'postgres';
     host: string;
     port: string;
     sslEnabled: boolean;
     user: string;
     catalog: string;
     schema: string;
+    database: string;
     maxRows: string;
 }
 
 export interface ConnectionMessage extends ConnectionFormData {
-    type: 'save';
+    /** `save` stores the connection; `test` only checks that it works. */
+    type: 'save' | 'test';
     password: string;
     clearPassword: boolean;
     connect: boolean;
 }
 
 export function isConnectionMessage(value: unknown): value is ConnectionMessage {
-    return typeof value === 'object' && value !== null && (value as { type?: unknown }).type === 'save';
+    const type = (value as { type?: unknown } | null)?.type;
+    return typeof value === 'object' && value !== null && (type === 'save' || type === 'test');
 }
 
 /**
@@ -56,7 +60,7 @@ export function validateConnection(value: ConnectionMessage): string | undefined
     if (/:\/\//.test(value.host)) { return 'Could not read that URL. Use a host name, http(s)://host:port, or jdbc:trino://host:port.'; }
     if (!value.host.trim()) { return 'Enter a host name, an IP address, or paste a JDBC/HTTP URL.'; }
     if (!/^\d+$/.test(value.port.trim()) || Number(value.port) < 1 || Number(value.port) > 65535) { return 'Port must be between 1 and 65535.'; }
-    if (!value.user.trim()) { return 'Trino user is required.'; }
+    if (!value.user.trim()) { return 'A user name is required.'; }
     return undefined;
 }
 
@@ -110,6 +114,14 @@ details[open] summary::before{transform:rotate(90deg)}
 code{background:var(--vscode-textCodeBlock-background,rgba(128,128,128,.16));padding:1px 5px;border-radius:3px;font-family:var(--vscode-editor-font-family,monospace);font-size:.92em}
 .alert{display:none;align-items:flex-start;gap:8px;margin-bottom:14px;padding:9px 12px;border-radius:4px;color:var(--vscode-inputValidation-errorForeground,var(--vscode-foreground));background:var(--vscode-inputValidation-errorBackground,rgba(190,60,60,.16));border:1px solid var(--vscode-inputValidation-errorBorder,rgba(190,60,60,.7))}
 .alert.show{display:flex}
+select{width:100%;padding:7px 10px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,rgba(128,128,128,.5));border-radius:4px;font-family:inherit;font-size:13px}
+select:focus{outline:none;border-color:var(--vscode-focusBorder,#2f7ce0)}
+.result{display:none;align-items:flex-start;gap:8px;margin-top:12px;padding:9px 12px;border-radius:4px;font-size:.95em;white-space:pre-wrap;word-break:break-word}
+.result.show{display:flex}
+.result.ok{color:var(--vscode-testing-iconPassed,#2ea043);background:rgba(46,160,67,.12);border:1px solid rgba(46,160,67,.5)}
+.result.bad{color:var(--vscode-inputValidation-errorForeground,var(--vscode-foreground));background:var(--vscode-inputValidation-errorBackground,rgba(190,60,60,.16));border:1px solid var(--vscode-inputValidation-errorBorder,rgba(190,60,60,.7))}
+.result.busy{color:var(--vscode-descriptionForeground);background:rgba(128,128,128,.12);border:1px solid var(--vscode-panel-border,rgba(128,128,128,.35))}
+[data-engine]{display:none}
 .alert::before{content:"\\26A0";flex:0 0 auto}
 .actions{position:fixed;left:0;right:0;bottom:0;display:flex;justify-content:flex-end;gap:10px;padding:14px 20px;background:var(--vscode-editor-background,#1f1f1f);border-top:1px solid var(--vscode-panel-border,rgba(128,128,128,.3))}
 .actions-inner{width:100%;max-width:640px;margin:0 auto;display:flex;justify-content:flex-end;gap:10px}
@@ -134,8 +146,16 @@ button:focus-visible{outline:2px solid var(--vscode-focusBorder,#2f7ce0);outline
     <section class="card">
       <h2 class="card-title">Coordinator</h2>
       <div class="field">
+        <label class="lbl" for="engine">Database</label>
+        <select id="engine">
+          <option value="trino"${values.engine === 'postgres' ? '' : ' selected'}>Trino</option>
+          <option value="postgres"${values.engine === 'postgres' ? ' selected' : ''}>PostgreSQL</option>
+        </select>
+        <p class="hint">Choosing an engine changes the fields below.</p>
+      </div>
+      <div class="field">
         <label class="lbl" for="name">Connection name</label>
-        <input id="name" value="${escape(values.name)}" placeholder="Development Trino">
+        <input id="name" value="${escape(values.name)}" placeholder="Development database">
         <p class="hint">Shown in the Connections view.</p>
       </div>
       <div class="field row">
@@ -148,12 +168,18 @@ button:focus-visible{outline:2px solid var(--vscode-focusBorder,#2f7ce0);outline
           <input id="port" type="number" min="1" max="65535" value="${escape(values.port)}" required>
         </div>
       </div>
+      <div class="field" data-engine="postgres">
+        <label class="lbl" for="database">Database</label>
+        <input id="database" value="${escape(values.database)}" placeholder="postgres">
+        <p class="hint">The database to open. Others on the same server are still browsable in the tree.</p>
+      </div>
       <label class="switch">
         <input id="sslEnabled" type="checkbox" ${values.sslEnabled ? 'checked' : ''}>
         <span class="track"></span>
-        <span class="switch-label">Enable SSL / HTTPS</span>
+        <span class="switch-label">Enable SSL / TLS</span>
       </label>
-      <p class="hint">Required when the coordinator serves TLS. Ports 443 and 8443 enable this automatically.</p>
+      <p class="hint" data-engine="trino">Required when the coordinator serves TLS. Ports 443 and 8443 enable this automatically.</p>
+      <p class="hint" data-engine="postgres">Use TLS to reach the server. Required by most hosted Postgres providers.</p>
     </section>
 
     <section class="card">
@@ -161,7 +187,8 @@ button:focus-visible{outline:2px solid var(--vscode-focusBorder,#2f7ce0);outline
       <div class="field">
         <label class="lbl" for="user">User<span class="req">*</span></label>
         <input id="user" value="${escape(values.user)}" required placeholder="your.username">
-        <p class="hint">Sent as the <code>X-Trino-User</code> header.</p>
+        <p class="hint" data-engine="trino">Sent as the <code>X-Trino-User</code> header.</p>
+        <p class="hint" data-engine="postgres">The Postgres role to connect as.</p>
       </div>
       <div class="field">
         <label class="lbl" for="password">Password</label>
@@ -175,7 +202,7 @@ button:focus-visible{outline:2px solid var(--vscode-focusBorder,#2f7ce0);outline
       <details${advancedOpen}>
         <summary>Session defaults and limits</summary>
         <div class="details-body">
-          <div class="field row">
+          <div class="field row" data-engine="trino">
             <div>
               <label class="lbl" for="catalog">Default catalog</label>
               <input id="catalog" value="${escape(values.catalog)}" placeholder="hive">
@@ -193,21 +220,62 @@ button:focus-visible{outline:2px solid var(--vscode-focusBorder,#2f7ce0);outline
         </div>
       </details>
     </section>
+    <div id="result" class="result" role="status"></div>
   </form>
 </div>
 <div class="actions">
   <div class="actions-inner">
+    <button type="button" id="test" class="secondary">Test Connection</button>
     <button type="submit" form="connection" class="secondary" data-connect="false">Save</button>
     <button type="submit" form="connection" data-connect="true">Save &amp; Connect</button>
   </div>
 </div>`;
 
-    const script = `const vscode=acquireVsCodeApi();let connect=true;
+    const script = `const vscode=acquireVsCodeApi();
+const byId=id=>document.getElementById(id);
+let connect=true;
+
+// Show only the fields that belong to the selected engine.
+function applyEngine(){
+  const engine=byId('engine').value;
+  document.querySelectorAll('[data-engine]').forEach(el=>{
+    el.style.display = el.dataset.engine===engine ? '' : 'none';
+  });
+  const port=byId('port');
+  if(!port.dataset.touched){ port.value = engine==='postgres' ? '5432' : '8080'; }
+}
+byId('engine').addEventListener('change',applyEngine);
+byId('port').addEventListener('input',()=>{byId('port').dataset.touched='1';});
+applyEngine();
+
+function payload(kind){
+  return {type:kind,engine:byId('engine').value,name:byId('name').value,host:byId('host').value,
+    port:byId('port').value,sslEnabled:byId('sslEnabled').checked,user:byId('user').value,
+    password:byId('password').value,clearPassword:byId('clearPassword').checked,
+    catalog:byId('catalog').value,schema:byId('schema').value,database:byId('database').value,
+    maxRows:byId('maxRows').value,connect};
+}
+
 document.querySelectorAll('button[type=submit]').forEach(b=>b.addEventListener('click',()=>{connect=b.dataset.connect==='true';}));
-document.getElementById('connection').addEventListener('submit',e=>{e.preventDefault();const byId=id=>document.getElementById(id);
-vscode.postMessage({type:'save',name:byId('name').value,host:byId('host').value,port:byId('port').value,sslEnabled:byId('sslEnabled').checked,user:byId('user').value,password:byId('password').value,clearPassword:byId('clearPassword').checked,catalog:byId('catalog').value,schema:byId('schema').value,maxRows:byId('maxRows').value,connect});});
-window.addEventListener('message',e=>{if(e.data.type==='error'){const box=document.getElementById('error');box.textContent=e.data.message;box.classList.add('show');box.scrollIntoView({block:'nearest'});}});
-document.getElementById('host').focus();`;
+byId('connection').addEventListener('submit',e=>{e.preventDefault();vscode.postMessage(payload('save'));});
+byId('test').addEventListener('click',()=>{
+  const box=byId('result');
+  box.className='result show busy';
+  box.textContent='Testing connection…';
+  vscode.postMessage(payload('test'));
+});
+window.addEventListener('message',e=>{
+  if(e.data.type==='error'){
+    const box=byId('error'); box.textContent=e.data.message; box.classList.add('show'); box.scrollIntoView({block:'nearest'});
+  }
+  if(e.data.type==='testResult'){
+    const box=byId('result');
+    box.className='result show '+(e.data.ok?'ok':'bad');
+    box.textContent=e.data.message;
+    box.scrollIntoView({block:'nearest'});
+  }
+});
+byId('host').focus();`;
 
     return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Trino Connection</title><style>${styles}</style></head><body>${body}<script nonce="${nonce}">${script}</script></body></html>`;
 }

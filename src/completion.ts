@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { ConnectionStore } from './connectionStore';
-import { TrinoClient } from './trinoClient';
+import { SqlClient, createClient } from './client';
 
 /**
  * Completes catalog, schema, table, and column names from the active connection.
@@ -22,7 +22,7 @@ export class SqlCompletionProvider implements vscode.CompletionItemProvider {
         if (!connection) { return []; }
         const prefix = document.getText(new vscode.Range(position.line, 0, position.line, position.character));
         const qualifier = qualifierParts(prefix);
-        const client = new TrinoClient(this.secrets, connection);
+        const client = createClient(this.secrets, connection);
 
         try {
             if (qualifier.length === 0) {

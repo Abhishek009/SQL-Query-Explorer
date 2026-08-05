@@ -2,11 +2,12 @@
 .vscode/**
 .vscode-test/**
 
-# TypeScript sources — only the compiled out/ is executed.
-# Source maps in out/ are kept intentionally so user-reported
-# stack traces resolve to real .ts line numbers.
+# TypeScript sources — only the bundle in dist/ is executed.
+# Its source map is kept so user-reported stack traces stay readable.
 src/**
 **/*.ts
+out/**
+esbuild.mjs
 
 # All dependencies are devDependencies, so nothing is needed at runtime
 node_modules/**

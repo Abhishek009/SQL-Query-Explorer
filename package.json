@@ -2,7 +2,7 @@
   "name": "trino-explorer",
   "displayName": "SQL Query Explorer",
   "publisher": "big-tech-talk",
-  "description": "Browse schemas and run SQL from VS Code. Supports Trino today, with more engines to follow.",
+  "description": "Browse schemas and run SQL from VS Code. Supports Trino and PostgreSQL.",
   "version": "1.0.7",
   "license": "MIT",
   "repository": {
@@ -27,12 +27,14 @@
     "query",
     "sql client",
     "trino",
-    "presto"
+    "presto",
+    "postgres",
+    "postgresql"
   ],
   "activationEvents": [
     "onLanguage:sql"
   ],
-  "main": "./out/extension.js",
+  "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
@@ -145,15 +147,15 @@
               },
               "url": {
                 "type": "string",
-                "description": "Coordinator URL, for example https://trino.example.com:443."
+                "description": "Server URL, for example https://trino.example.com:443 or postgresql://localhost:5432."
               },
               "user": {
                 "type": "string",
-                "description": "User sent in the X-Trino-User header."
+                "description": "User name sent when connecting."
               },
               "catalog": {
                 "type": "string",
-                "description": "Optional default catalog for the session."
+                "description": "Trino: optional default catalog. PostgreSQL: the database to open."
               },
               "schema": {
                 "type": "string",
@@ -163,6 +165,18 @@
                 "type": "number",
                 "minimum": 1,
                 "description": "Optional per-connection row cap. Overrides sqlExplorer.query.maxRows."
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "trino",
+                  "postgres"
+                ],
+                "description": "Engine this connection speaks. Absent means Trino."
+              },
+              "ssl": {
+                "type": "boolean",
+                "description": "PostgreSQL only: use TLS to reach the server."
               }
             }
           }
@@ -431,14 +445,20 @@
     ]
   },
   "scripts": {
-    "vscode:prepublish": "npm run compile",
+    "vscode:prepublish": "npm run bundle -- --production",
+    "bundle": "node esbuild.mjs",
     "compile": "tsc -p ./",
-    "watch": "tsc -watch -p ./"
+    "watch": "node esbuild.mjs --watch"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
+    "@types/pg": "^8.20.4",
     "@types/vscode": "^1.85.0",
     "@vscode/vsce": "^3.9.2",
+    "esbuild": "^0.28.1",
     "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "pg": "^8.22.0"
   }
 }

@@ -2,13 +2,15 @@ import * as vscode from 'vscode';
 import { randomUUID } from 'crypto';
 import { ErrorState, ResultsState, StoredConnection, TrinoQueryResult, TrinoRequestError } from './types';
 import { ConnectionStore, passwordKey } from './connectionStore';
-import { TrinoClient } from './trinoClient';
+import { SqlClient, createClient } from './client';
 import { ExplorerItem, TrinoExplorerProvider, qualifiedName } from './explorer';
 import { ResultsSurface, ResultsTabs } from './resultsView';
 import { QueryStatusProvider } from './queryStatus';
 import { RunningQueryRegistry } from './runningQueries';
 import { ConnectionMessage, connectionFormHtml, expandPastedUrl, isConnectionMessage, parseMaxRows, validateConnection } from './connectionForm';
 import { formatHost, parseConnectionUrl } from './urls';
+import { engineOf, ENGINE_LABELS } from './client';
+import { PostgresClient, hostAndPort } from './postgresClient';
 import { previewRowLimit, quoteIdentifier, showConnectionError, summarize } from './util';
 
 export async function pickConnection(store: ConnectionStore, placeHolder: string): Promise<StoredConnection | undefined> {
@@ -58,7 +60,7 @@ export async function previewTable(store: ConnectionStore, secrets: vscode.Secre
     if (!force && !isDoubleClick(`${connection.id}/${item.catalog}/${item.schema}/${item.table}`)) { return; }
     const qualified = `${quoteIdentifier(item.catalog)}.${quoteIdentifier(item.schema)}.${quoteIdentifier(item.table)}`;
     const limit = previewRowLimit();
-    const client = new TrinoClient(secrets, connection, registry);
+    const client = createClient(secrets, connection, registry);
     const fetchRows = (rowLimit: number, token?: vscode.CancellationToken) =>
         client.query(`SELECT * FROM ${qualified} LIMIT ${rowLimit}`, token);
     const started = Date.now();
@@ -95,7 +97,7 @@ export async function showTableDdl(
     try {
         const ddl = await vscode.window.withProgress(
             { location: vscode.ProgressLocation.Notification, title: `Fetching DDL for ${item.table}…`, cancellable: true },
-            (_, token) => new TrinoClient(secrets, connection, registry).tableDdl(item.catalog!, item.schema!, item.table!, isView, token)
+            (_, token) => createClient(secrets, connection, registry).tableDdl(item.catalog!, item.schema!, item.table!, isView, token)
         );
         if (!ddl) {
             vscode.window.showWarningMessage(`No DDL returned for ${item.catalog}.${item.schema}.${item.table}.`);
@@ -179,7 +181,7 @@ export async function executeSql(request: ExecuteRequest): Promise<void> {
     try {
         const result = await vscode.window.withProgress(
             { location: vscode.ProgressLocation.Notification, title: `Running query on ${connection.name}…`, cancellable: true },
-            (_, token) => new TrinoClient(secrets, connection, registry).query(sql, token)
+            (_, token) => createClient(secrets, connection, registry).query(sql, token)
         );
         const elapsed = Date.now() - started;
         status.record(uri, { line, milliseconds: elapsed, rows: result.rows.length });
@@ -259,13 +261,64 @@ export async function showSqlResults(
     });
 }
 
+/** Turns the form fields into a connection, in the shape each engine expects. */
+export function connectionFromForm(request: ConnectionMessage, id: string): StoredConnection {
+    const host = formatHost(request.host.trim());
+    const port = request.port.trim();
+    const postgres = request.engine === 'postgres';
+    return {
+        id,
+        name: request.name.trim() || (postgres ? 'PostgreSQL Connection' : 'Trino Connection'),
+        type: request.engine,
+        // Postgres keeps its database in `catalog`, which is also the tree's top level.
+        url: postgres ? `postgresql://${host}:${port}` : `${request.sslEnabled ? 'https' : 'http'}://${host}:${port}`,
+        user: request.user.trim(),
+        catalog: postgres ? (request.database.trim() || 'postgres') : (request.catalog.trim() || undefined),
+        schema: postgres ? undefined : (request.schema.trim() || undefined),
+        ssl: postgres ? request.sslEnabled : undefined,
+        maxRows: parseMaxRows(request.maxRows)
+    };
+}
+
+/**
+ * Runs a real query against the entered details without saving anything. The
+ * typed password is passed straight through, since it is not in storage yet.
+ */
+async function reportConnectionTest(
+    panel: vscode.WebviewPanel,
+    secrets: vscode.SecretStorage,
+    candidate: StoredConnection,
+    password: string
+): Promise<void> {
+    const label = ENGINE_LABELS[engineOf(candidate)];
+    try {
+        const banner = await vscode.window.withProgress(
+            { location: vscode.ProgressLocation.Window, title: `Testing ${candidate.name}…`, cancellable: true },
+            (_, token) => createClient(secrets, candidate, undefined, password || undefined).testConnection(token)
+        );
+        void panel.webview.postMessage({
+            type: 'testResult', ok: true,
+            message: `Connected to ${label} at ${candidate.url}\n${banner}`
+        });
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        void panel.webview.postMessage({ type: 'testResult', ok: false, message: summarize(message) });
+    } finally {
+        // A test must not leave a pooled socket behind for an unsaved connection.
+        await PostgresClient.closeAll(candidate.id);
+    }
+}
+
 export async function showConnectionWindow(
     context: vscode.ExtensionContext,
     store: ConnectionStore,
     provider: TrinoExplorerProvider,
     existing: StoredConnection | undefined
 ): Promise<void> {
-    const current = parseConnectionUrl(existing?.url ?? 'http://localhost:8080');
+    const engine = engineOf(existing ?? { type: 'trino' } as StoredConnection);
+    const current = engine === 'postgres'
+        ? { ...hostAndPort(existing?.url ?? 'postgresql://localhost:5432'), sslEnabled: Boolean(existing?.ssl) }
+        : parseConnectionUrl(existing?.url ?? 'http://localhost:8080');
     const panel = vscode.window.createWebviewPanel(
         'trinoConnection',
         existing ? `Edit ${existing.name}` : 'New Trino Connection',
@@ -274,13 +327,15 @@ export async function showConnectionWindow(
     );
     const hasPassword = existing ? Boolean(await context.secrets.get(passwordKey(existing.id))) : false;
     panel.webview.html = connectionFormHtml(panel.webview, {
-        name: existing?.name ?? 'Trino Connection',
+        name: existing?.name ?? 'New Connection',
+        engine,
         host: current.host,
-        port: current.port,
+        port: String(current.port),
         sslEnabled: current.sslEnabled,
         user: existing?.user ?? '',
-        catalog: existing?.catalog ?? '',
+        catalog: engine === 'postgres' ? '' : (existing?.catalog ?? ''),
         schema: existing?.schema ?? '',
+        database: engine === 'postgres' ? (existing?.catalog ?? '') : '',
         maxRows: existing?.maxRows ? String(existing.maxRows) : ''
     }, Boolean(existing), hasPassword);
 
@@ -293,16 +348,15 @@ export async function showConnectionWindow(
             return;
         }
         const id = existing?.id ?? randomUUID();
-        const url = `${request.sslEnabled ? 'https' : 'http'}://${formatHost(request.host.trim())}:${request.port.trim()}`;
-        await store.save({
-            id,
-            name: request.name.trim() || 'Trino Connection',
-            url,
-            user: request.user.trim(),
-            catalog: request.catalog.trim() || undefined,
-            schema: request.schema.trim() || undefined,
-            maxRows: parseMaxRows(request.maxRows)
-        });
+        const candidate = connectionFromForm(request, id);
+        const url = candidate.url;
+
+        if (request.type === 'test') {
+            await reportConnectionTest(panel, context.secrets, candidate, request.password);
+            return;
+        }
+
+        await store.save(candidate);
         if (request.clearPassword) { await context.secrets.delete(passwordKey(id)); }
         else if (request.password) { await context.secrets.store(passwordKey(id), request.password); }
 

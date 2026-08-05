@@ -5,8 +5,12 @@ export interface StoredConnection {
     name: string;
     url: string;
     user: string;
+    /** Engine this connection speaks; absent means Trino, from before Postgres. */
+    type?: 'trino' | 'postgres';
     catalog?: string;
     schema?: string;
+    /** Postgres only: TLS to the server. Trino carries this in its URL scheme. */
+    ssl?: boolean;
     /** Optional per-connection override of `trino.query.maxRows`. */
     maxRows?: number;
 }

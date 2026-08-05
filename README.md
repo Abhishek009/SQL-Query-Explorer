@@ -2,16 +2,19 @@
 
 A VS Code extension for browsing database schemas and running SQL without leaving the editor.
 
-It currently speaks [Trino](https://trino.io); the connection, results, and editor features are engine-agnostic, so further engines are being added.
+Supports **[Trino](https://trino.io)** and **[PostgreSQL](https://www.postgresql.org)**. The explorer, results grid, and editor features are shared by both, so further engines slot in behind the same interface.
 
 ## Features
 
 ### Connections
-- **Manage several coordinators at once** — dev, staging, and production sit side by side in the **Connections** view. Add one with the **+** button, then edit, remove, or refresh each from its context menu.
+- **Pick the engine when adding a connection** — Trino or PostgreSQL — and the form shows only the fields that engine needs.
+- **Test Connection** runs a real query against the details you typed, before saving anything.
+- **Manage several servers at once** — dev, staging, and production sit side by side in the **Connections** view. Add one with the **+** button, then edit, remove, or refresh each from its context menu.
 - One connection is **active** for queries at a time; right-click → **Use Connection for Queries** to switch.
 - **Paste a JDBC connection string or a full URL into the Host field** and the rest of the form fills itself in — see [Connection URL formats](#connection-url-formats).
 - Passwords are stored in **VS Code Secret Storage**, never in `settings.json`.
-- All metadata and query traffic goes through Trino's `/v1/statement` endpoint.
+- Trino traffic goes through the `/v1/statement` REST endpoint; PostgreSQL uses the native wire protocol.
+- For PostgreSQL the tree's top level lists **databases** on the server, so siblings of the one you opened are browsable too.
 
 #### Connection URL formats
 

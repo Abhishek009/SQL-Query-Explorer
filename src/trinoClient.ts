@@ -4,6 +4,7 @@ import { passwordKey } from './connectionStore';
 import { describeFetchFailure, firstColumn, numberSetting, quoteIdentifier, quoteLiteral, summarize } from './util';
 import { httpBaseUrl } from './urls';
 import { RunningQueryRegistry } from './runningQueries';
+import { SqlClient } from './client';
 
 /**
  * Copies a page into the accumulator, stopping at the cap. Written as a loop
@@ -31,13 +32,21 @@ export interface TrinoPage {
     error?: { message: string; errorName?: string };
 }
 
-export class TrinoClient {
+export class TrinoClient implements SqlClient {
     public constructor(
         private readonly secrets: vscode.SecretStorage,
         private readonly connection: StoredConnection,
         /** Set for user-initiated statements so they appear in the status bar. */
-        private readonly registry?: RunningQueryRegistry
+        private readonly registry?: RunningQueryRegistry,
+        /** Supplied while testing details that are not in Secret Storage yet. */
+        private readonly passwordOverride?: string
     ) {}
+
+    /** SELECT 1 proves credentials and reachability without touching data. */
+    public async testConnection(token?: vscode.CancellationToken): Promise<string> {
+        const result = await this.query('SELECT version()', token);
+        return String(result.rows[0]?.[0] ?? 'Connected');
+    }
 
     public async catalogs(token?: vscode.CancellationToken): Promise<string[]> {
         return firstColumn(await this.query('SHOW CATALOGS', token));
@@ -113,7 +122,7 @@ export class TrinoClient {
             throw new Error(`Could not read the Trino URL "${rawUrl}". Use http(s)://host:port or jdbc:trino://host:port.`);
         }
 
-        const password = await this.secrets.get(passwordKey(this.connection.id));
+        const password = this.passwordOverride ?? await this.secrets.get(passwordKey(this.connection.id));
         const headers: Record<string, string> = {
             'X-Trino-User': user,
             'Content-Type': 'text/plain'

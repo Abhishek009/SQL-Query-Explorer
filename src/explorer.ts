@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { StoredConnection, TableEntry, TrinoColumn } from './types';
 import { ConnectionStore } from './connectionStore';
-import { TrinoClient } from './trinoClient';
+import { SqlClient, createClient } from './client';
 import { quoteIdentifier, showConnectionError } from './util';
 
 export type ExplorerNodeKind = 'connection' | 'catalog' | 'schema' | 'group' | 'table' | 'column' | 'empty';
@@ -30,7 +30,7 @@ export class TrinoExplorerProvider implements vscode.TreeDataProvider<ExplorerIt
 
         const connection = this.store.get(element.connectionId);
         if (!connection) { return []; }
-        const client = new TrinoClient(this.secrets, connection);
+        const client = createClient(this.secrets, connection);
         try {
             if (element.kind === 'connection') {
                 const catalogs = this.catalogsByConnection.get(connection.id) ?? await this.loadCatalogs(client, connection);
@@ -68,7 +68,7 @@ export class TrinoExplorerProvider implements vscode.TreeDataProvider<ExplorerIt
      * Cached because both group nodes and their children need the same listing;
      * without it, expanding a schema and then its Tables folder queries twice.
      */
-    private async tableEntries(client: TrinoClient, connectionId: string, catalog: string, schema: string): Promise<TableEntry[]> {
+    private async tableEntries(client: SqlClient, connectionId: string, catalog: string, schema: string): Promise<TableEntry[]> {
         const key = `${connectionId}/${catalog}/${schema}`;
         const cached = this.entriesBySchema.get(key);
         if (cached) { return cached; }
@@ -79,7 +79,7 @@ export class TrinoExplorerProvider implements vscode.TreeDataProvider<ExplorerIt
 
     /** Loads and caches a connection's catalogs, marking it connected in the tree. */
     public async connect(connection: StoredConnection): Promise<void> {
-        const client = new TrinoClient(this.secrets, connection);
+        const client = createClient(this.secrets, connection);
         await this.loadCatalogs(client, connection);
         await this.store.setActive(connection.id);
     }
@@ -116,7 +116,7 @@ export class TrinoExplorerProvider implements vscode.TreeDataProvider<ExplorerIt
         }
     }
 
-    private async loadCatalogs(client: TrinoClient, connection: StoredConnection): Promise<string[]> {
+    private async loadCatalogs(client: SqlClient, connection: StoredConnection): Promise<string[]> {
         const catalogs = await vscode.window.withProgress(
             { location: vscode.ProgressLocation.Window, title: `Connecting to ${connection.name}…`, cancellable: true },
             (_, token) => client.catalogs(token)
