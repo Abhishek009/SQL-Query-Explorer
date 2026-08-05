@@ -178,13 +178,13 @@ export class ExplorerItem extends vscode.TreeItem {
         super(label, kind === 'column' || kind === 'empty'
             ? vscode.TreeItemCollapsibleState.None
             : vscode.TreeItemCollapsibleState.Collapsed);
-        this.contextValue = `trino.${kind}`;
+        this.contextValue = `sqlExplorer.${kind}`;
     }
 
     public static empty(): ExplorerItem {
         const item = new ExplorerItem('Add a Trino connection', 'empty');
         item.iconPath = new vscode.ThemeIcon('add');
-        item.command = { command: 'trino.addConnection', title: 'Add Trino Connection' };
+        item.command = { command: 'sqlExplorer.addConnection', title: 'Add Trino Connection' };
         item.tooltip = 'Add a Trino coordinator to browse its catalogs.';
         return item;
     }
@@ -197,7 +197,7 @@ export class ExplorerItem extends vscode.TreeItem {
         item.tooltip = new vscode.MarkdownString(
             `**${connection.name}**\n\n${connection.url}\n\nUser: \`${connection.user}\`${active ? '\n\nActive connection for SQL queries.' : ''}`
         );
-        item.contextValue = active ? 'trino.connection.active' : 'trino.connection';
+        item.contextValue = active ? 'sqlExplorer.connection.active' : 'sqlExplorer.connection';
         return item;
     }
 
@@ -220,7 +220,7 @@ export class ExplorerItem extends vscode.TreeItem {
         const item = new ExplorerItem(`${label} (${count.toLocaleString()})`, 'group', connectionId, catalog, schema, undefined, group);
         item.iconPath = new vscode.ThemeIcon(group === 'tables' ? 'symbol-structure' : 'eye');
         item.tooltip = `${count.toLocaleString()} ${label.toLowerCase()} in ${catalog}.${schema}`;
-        item.contextValue = `trino.group.${group}`;
+        item.contextValue = `sqlExplorer.group.${group}`;
         // Nothing to expand into, so do not offer an arrow that reveals nothing.
         item.collapsibleState = count === 0
             ? vscode.TreeItemCollapsibleState.None
@@ -232,10 +232,10 @@ export class ExplorerItem extends vscode.TreeItem {
         const item = new ExplorerItem(table, 'table', connectionId, catalog, schema, table);
         // The parent folder already says which it is, so the label stays clean.
         item.iconPath = new vscode.ThemeIcon(view ? 'eye' : 'list-flat');
-        item.contextValue = view ? 'trino.view' : 'trino.table';
+        item.contextValue = view ? 'sqlExplorer.view' : 'sqlExplorer.table';
         item.tooltip = `${catalog}.${schema}.${table}`;
         // Fires on every click; the handler previews only on a double click.
-        item.command = { command: 'trino.tableClicked', title: 'Preview Table Data', arguments: [item] };
+        item.command = { command: 'sqlExplorer.tableClicked', title: 'Preview Table Data', arguments: [item] };
         return item;
     }
 

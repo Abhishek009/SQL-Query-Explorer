@@ -54,7 +54,7 @@ export class RunningQueryStatus implements vscode.Disposable {
 
     public constructor(private readonly registry: RunningQueryRegistry) {
         this.item = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 1000);
-        this.item.command = 'trino.cancelQuery';
+        this.item.command = 'sqlExplorer.cancelQuery';
         this.subscription = registry.onDidChange(() => this.render());
         this.render();
     }
@@ -72,8 +72,8 @@ export class RunningQueryStatus implements vscode.Disposable {
         const oldest = running.reduce((a, b) => a.startedAt <= b.startedAt ? a : b);
         const elapsed = formatDuration(Date.now() - oldest.startedAt);
         this.item.text = running.length === 1
-            ? `$(sync~spin) Trino ${elapsed}`
-            : `$(sync~spin) Trino ${running.length} queries ${elapsed}`;
+            ? `$(sync~spin) SQL ${elapsed}`
+            : `$(sync~spin) SQL ${running.length} queries ${elapsed}`;
         this.item.tooltip = new vscode.MarkdownString(
             [`**Running ${running.length === 1 ? 'query' : 'queries'}** — click to cancel\n`,
              ...running.map(query => {
@@ -100,7 +100,7 @@ export function firstLine(sql: string): string {
 export async function cancelRunningQuery(registry: RunningQueryRegistry): Promise<void> {
     const running = registry.all();
     if (!running.length) {
-        vscode.window.showInformationMessage('No Trino queries are running.');
+        vscode.window.showInformationMessage('No queries are running.');
         return;
     }
     const chosen = running.length === 1 ? running[0] : await pickQuery(running);

@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { StoredConnection, TableEntry, TrinoColumn, TrinoQueryResult, TrinoRequestError } from './types';
 import { passwordKey } from './connectionStore';
-import { describeFetchFailure, firstColumn, quoteIdentifier, quoteLiteral, summarize } from './util';
+import { describeFetchFailure, firstColumn, numberSetting, quoteIdentifier, quoteLiteral, summarize } from './util';
 import { httpBaseUrl } from './urls';
 import { RunningQueryRegistry } from './runningQueries';
 
@@ -102,8 +102,7 @@ export class TrinoClient {
     public maxRows(): number {
         const perConnection = Number(this.connection.maxRows);
         if (Number.isFinite(perConnection) && perConnection > 0) { return Math.trunc(perConnection); }
-        const configured = Number(vscode.workspace.getConfiguration('trino').get('query.maxRows'));
-        return Number.isFinite(configured) && configured > 0 ? Math.trunc(configured) : 10_000;
+        return numberSetting('query.maxRows', 10_000);
     }
 
     private async runStatement(statement: string, token?: vscode.CancellationToken): Promise<TrinoQueryResult> {

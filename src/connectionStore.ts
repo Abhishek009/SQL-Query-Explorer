@@ -19,7 +19,7 @@ export class ConnectionStore {
     public constructor(private readonly context: vscode.ExtensionContext) {}
 
     public all(): StoredConnection[] {
-        const stored = vscode.workspace.getConfiguration('trino').get<StoredConnection[]>('connections') ?? [];
+        const stored = vscode.workspace.getConfiguration('sqlExplorer').get<StoredConnection[]>('connections') ?? [];
         return stored.filter(connection => connection && connection.id && connection.url);
     }
 
@@ -49,10 +49,18 @@ export class ConnectionStore {
         if (this.activeId === id) { await this.setActive(undefined); }
     }
 
-    /** Moves a pre-multi-connection `trino.connection.*` setup into the list. */
+    /**
+     * Brings forward settings written under earlier names: first the previous
+     * `trino.connections` list, then the original single-connection keys.
+     */
     public async migrateLegacyConnection(): Promise<void> {
         if (this.all().length) { return; }
-        const legacy = vscode.workspace.getConfiguration('trino.connection');
+        const previous = vscode.workspace.getConfiguration('trino').get<StoredConnection[]>('connections') ?? [];
+        if (previous.length) {
+            await this.write(previous.filter(connection => connection?.id && connection.url));
+            return;
+        }
+        const legacy = vscode.workspace.getConfiguration('sqlExplorer.connection');
         const url = String(legacy.get('url') ?? '').trim();
         const user = String(legacy.get('user') ?? '').trim();
         if (!url || !user) { return; }
@@ -74,7 +82,7 @@ export class ConnectionStore {
     }
 
     private async write(connections: StoredConnection[]): Promise<void> {
-        await vscode.workspace.getConfiguration('trino').update('connections', connections, vscode.ConfigurationTarget.Global);
+        await vscode.workspace.getConfiguration('sqlExplorer').update('connections', connections, vscode.ConfigurationTarget.Global);
         this.changed.fire();
     }
 }

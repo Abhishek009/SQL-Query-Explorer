@@ -77,13 +77,13 @@ export class QueryStatusProvider implements vscode.CodeLensProvider, vscode.Disp
             lenses.push(new vscode.CodeLens(range, {
                 title: '$(play) Run',
                 tooltip: 'Run this statement and show the results in the Trino Results panel',
-                command: 'trino.runStatement',
+                command: 'sqlExplorer.runStatement',
                 arguments: args
             }));
             lenses.push(new vscode.CodeLens(range, {
                 title: '$(split-horizontal) New Tab',
                 tooltip: 'Run this statement in a new results tab, leaving earlier results open',
-                command: 'trino.runStatementNewTab',
+                command: 'sqlExplorer.runStatementNewTab',
                 arguments: args
             }));
         }

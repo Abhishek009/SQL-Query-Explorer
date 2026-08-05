@@ -1,6 +1,8 @@
-# Trino Explorer
+# SQL Explorer
 
-A VS Code extension that connects to one or more [Trino](https://trino.io) coordinators, lets you browse catalogs, schemas, tables, and columns from the Activity Bar, and run SQL against them without leaving the editor.
+A VS Code extension for browsing database schemas and running SQL without leaving the editor.
+
+It currently speaks [Trino](https://trino.io); the connection, results, and editor features are engine-agnostic, so further engines are being added.
 
 ## Features
 
@@ -60,36 +62,36 @@ Results open in an editor tab beside your query. `Run` reuses one tab; `New Tab`
 - **Errors appear in the same panel** with the full server response — Trino's error JSON including `errorName` and `errorLocation` — not a truncated notification.
 
 ### Row cap
-Queries without a `LIMIT` could otherwise pull an entire table into memory. The extension stops fetching at `trino.query.maxRows` (default 10,000), **cancels the query on the coordinator**, and shows a banner so truncation is never silent. Any connection can override the cap in its own settings.
+Queries without a `LIMIT` could otherwise pull an entire table into memory. The extension stops fetching at `sqlExplorer.query.maxRows` (default 10,000), **cancels the query on the coordinator**, and shows a banner so truncation is never silent. Any connection can override the cap in its own settings.
 
 ### Commands
 
 | Command | Description |
 | --- | --- |
-| `Trino: Add Connection` | Create a new coordinator connection. |
-| `Trino: Edit Connection` | Change an existing connection's details. |
-| `Trino: Remove Connection` | Delete a connection and its saved password. |
-| `Trino: Use Connection for Queries` | Make a connection the active one for SQL. |
-| `Trino: Connect` | Connect and load catalogs. |
-| `Trino: New SQL Query` | Open a new SQL editor. |
-| `Trino: Run SQL Query` | Execute the selection, or the whole editor if nothing is selected. |
-| `Trino: Preview Table Data` | Run a bounded `SELECT` against the selected table. |
-| `Trino: Show Table DDL` | Open `SHOW CREATE TABLE` output for the selected table. |
+| `SQL: Add Connection` | Create a new coordinator connection. |
+| `SQL: Edit Connection` | Change an existing connection's details. |
+| `SQL: Remove Connection` | Delete a connection and its saved password. |
+| `SQL: Use Connection for Queries` | Make a connection the active one for SQL. |
+| `SQL: Connect` | Connect and load catalogs. |
+| `SQL: New SQL Query` | Open a new SQL editor. |
+| `SQL: Run SQL Query` | Execute the selection, or the whole editor if nothing is selected. |
+| `SQL: Preview Table Data` | Run a bounded `SELECT` against the selected table. |
+| `SQL: Show Table DDL` | Open `SHOW CREATE TABLE` output for the selected table. |
 | `New Query Here` | Open a SQL editor scoped to the selected node. |
-| `Trino: Refresh Catalogs` | Reload the tree and clear cached metadata. |
-| `Trino: Cancel Running Query` | Stop a running query on the coordinator. |
-| `Trino: Run Statement` | Run one statement into the shared results tab. |
-| `Trino: Run Statement in New Tab` | Run one statement into its own results tab. |
+| `SQL: Refresh Catalogs` | Reload the tree and clear cached metadata. |
+| `SQL: Cancel Running Query` | Stop a running query on the coordinator. |
+| `SQL: Run Statement` | Run one statement into the shared results tab. |
+| `SQL: Run Statement in New Tab` | Run one statement into its own results tab. |
 
 ### Settings
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `trino.connections` | `[]` | Saved connections. Managed by the Connections view; passwords are kept in Secret Storage, not here. |
-| `trino.query.maxRows` | `10000` | Hard cap on rows fetched for any statement. A connection can override it. |
-| `trino.preview.rowLimit` | `100` | Rows shown in the results grid, and fetched for a table preview. |
+| `sqlExplorer.connections` | `[]` | Saved connections. Managed by the Connections view; passwords are kept in Secret Storage, not here. |
+| `sqlExplorer.query.maxRows` | `10000` | Hard cap on rows fetched for any statement. A connection can override it. |
+| `sqlExplorer.preview.rowLimit` | `100` | Rows shown in the results grid, and fetched for a table preview. |
 
-The older `trino.connection.*` settings are deprecated. Existing values are migrated into `trino.connections` automatically on first run.
+Settings previously named `trino.*` are deprecated but still read: values are migrated into the `sqlExplorer.*` keys automatically on first run, and saved passwords are kept.
 
 ## Getting started
 
@@ -99,7 +101,7 @@ The older `trino.connection.*` settings are deprecated. Existing values are migr
    npm run compile
    ```
    Then open the project in VS Code and press `F5` to launch the Extension Development Host.
-2. Select the Trino icon in the Activity Bar, then **+** (or **Add Connection**).
+2. Select the SQL Explorer icon in the Activity Bar, then **+** (or **Add Connection**).
 3. Enter the host, port, SSL/HTTPS choice, and user, plus an optional password. You can also paste a full `jdbc:trino://…` or `http(s)://…` URL into **Host** and let the other fields populate themselves.
 4. Select **Save & Connect**.
 5. Expand a catalog to browse schemas, tables, and columns. Double-click a table to preview its data.

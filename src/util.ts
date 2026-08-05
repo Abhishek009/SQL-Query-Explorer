@@ -38,8 +38,24 @@ export function formatDuration(milliseconds: number): string {
 }
 
 export function previewRowLimit(): number {
-    const configured = vscode.workspace.getConfiguration('trino').get<number>('preview.rowLimit') ?? 100;
+    const configured = numberSetting('preview.rowLimit', 100);
     return Math.min(Math.max(Math.trunc(configured) || 100, 1), 10_000);
+}
+
+/**
+ * Reads a setting from the current namespace, falling back to the value a user
+ * had explicitly set under the old `trino.*` name. `get` cannot be used for the
+ * fallback because it returns the schema default rather than nothing.
+ */
+export function numberSetting(key: string, fallback: number): number {
+    return explicitSetting<number>('sqlExplorer', key)
+        ?? explicitSetting<number>('trino', key)
+        ?? fallback;
+}
+
+function explicitSetting<T>(section: string, key: string): T | undefined {
+    const info = vscode.workspace.getConfiguration(section).inspect<T>(key);
+    return info?.workspaceFolderValue ?? info?.workspaceValue ?? info?.globalValue;
 }
 
 /**
@@ -77,6 +93,6 @@ function hostOf(url: string): string {
 
 export function showConnectionError(error: unknown): void {
     const message = error instanceof Error ? error.message : String(error);
-    vscode.window.showErrorMessage(`Could not load Trino catalogs: ${message}`, 'Edit Connection')
-        .then(selection => { if (selection) { void vscode.commands.executeCommand('trino.editConnection'); } });
+    vscode.window.showErrorMessage(`Could not load catalogs: ${message}`, 'Edit Connection')
+        .then(selection => { if (selection) { void vscode.commands.executeCommand('sqlExplorer.editConnection'); } });
 }

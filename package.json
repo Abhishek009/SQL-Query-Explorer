@@ -1,9 +1,9 @@
 {
   "name": "trino-explorer",
-  "displayName": "Trino Explorer",
+  "displayName": "SQL Explorer",
   "publisher": "big-tech-talk",
-  "description": "Connect to Trino and browse available catalogs.",
-  "version": "1.0.4",
+  "description": "Browse schemas and run SQL from VS Code. Supports Trino today, with more engines to follow.",
+  "version": "1.0.6",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -18,13 +18,15 @@
     "vscode": "^1.85.0"
   },
   "categories": [
+    "Data Science",
     "Other"
   ],
   "keywords": [
-    "trino",
     "sql",
     "database",
     "query",
+    "sql client",
+    "trino",
     "presto"
   ],
   "activationEvents": [
@@ -34,96 +36,140 @@
   "contributes": {
     "commands": [
       {
-        "command": "trino.addConnection",
-        "title": "Trino: Add Connection",
+        "command": "sqlExplorer.addConnection",
+        "title": "SQL: Add Connection",
         "icon": "$(add)"
       },
       {
-        "command": "trino.editConnection",
-        "title": "Trino: Edit Connection",
+        "command": "sqlExplorer.editConnection",
+        "title": "SQL: Edit Connection",
         "icon": "$(edit)"
       },
       {
-        "command": "trino.removeConnection",
-        "title": "Trino: Remove Connection",
+        "command": "sqlExplorer.removeConnection",
+        "title": "SQL: Remove Connection",
         "icon": "$(trash)"
       },
       {
-        "command": "trino.setActiveConnection",
-        "title": "Trino: Use Connection for Queries",
+        "command": "sqlExplorer.setActiveConnection",
+        "title": "SQL: Use Connection for Queries",
         "icon": "$(check)"
       },
       {
-        "command": "trino.connect",
-        "title": "Trino: Connect",
+        "command": "sqlExplorer.connect",
+        "title": "SQL: Connect",
         "icon": "$(debug-disconnect)"
       },
       {
-        "command": "trino.configureConnection",
-        "title": "Trino: Configure Connection"
+        "command": "sqlExplorer.configureConnection",
+        "title": "SQL: Configure Connection"
       },
       {
-        "command": "trino.previewTable",
-        "title": "Trino: Preview Table Data",
+        "command": "sqlExplorer.previewTable",
+        "title": "SQL: Preview Table Data",
         "icon": "$(table)"
       },
       {
-        "command": "trino.tableClicked",
-        "title": "Trino: Open Table From Tree"
+        "command": "sqlExplorer.tableClicked",
+        "title": "SQL: Open Table From Tree"
       },
       {
-        "command": "trino.openQuery",
-        "title": "Trino: New SQL Query",
+        "command": "sqlExplorer.openQuery",
+        "title": "SQL: New SQL Query",
         "icon": "$(new-file)"
       },
       {
-        "command": "trino.runActiveSql",
-        "title": "Trino: Run SQL Query",
+        "command": "sqlExplorer.runActiveSql",
+        "title": "SQL: Run SQL Query",
         "icon": "$(play)"
       },
       {
-        "command": "trino.refreshCatalogs",
-        "title": "Trino: Refresh Catalogs",
+        "command": "sqlExplorer.refreshCatalogs",
+        "title": "SQL: Refresh Catalogs",
         "icon": "$(refresh)"
       },
       {
-        "command": "trino.cancelQuery",
-        "title": "Trino: Cancel Running Query",
+        "command": "sqlExplorer.cancelQuery",
+        "title": "SQL: Cancel Running Query",
         "icon": "$(stop-circle)"
       },
       {
-        "command": "trino.showTableDdl",
-        "title": "Trino: Show Table DDL",
+        "command": "sqlExplorer.showTableDdl",
+        "title": "SQL: Show Table DDL",
         "icon": "$(file-code)"
       },
       {
-        "command": "trino.refreshNode",
+        "command": "sqlExplorer.refreshNode",
         "title": "Refresh",
         "icon": "$(refresh)"
       },
       {
-        "command": "trino.newQueryHere",
+        "command": "sqlExplorer.newQueryHere",
         "title": "New Query Here",
         "icon": "$(new-file)"
       },
       {
-        "command": "trino.runStatement",
-        "title": "Trino: Run Statement",
+        "command": "sqlExplorer.runStatement",
+        "title": "SQL: Run Statement",
         "icon": "$(play)"
       },
       {
-        "command": "trino.runStatementNewTab",
-        "title": "Trino: Run Statement in New Tab",
+        "command": "sqlExplorer.runStatementNewTab",
+        "title": "SQL: Run Statement in New Tab",
         "icon": "$(split-horizontal)"
       }
     ],
     "configuration": {
-      "title": "Trino Explorer",
+      "title": "SQL Explorer",
       "properties": {
+        "sqlExplorer.connections": {
+          "type": "array",
+          "default": [],
+          "description": "Saved connections. Managed by the Connections view \u2014 passwords are kept in Secret Storage, not here.",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "name",
+              "url",
+              "user"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Stable identifier for the connection."
+              },
+              "name": {
+                "type": "string",
+                "description": "Display name shown in the Connections view."
+              },
+              "url": {
+                "type": "string",
+                "description": "Coordinator URL, for example https://trino.example.com:443."
+              },
+              "user": {
+                "type": "string",
+                "description": "User sent in the X-Trino-User header."
+              },
+              "catalog": {
+                "type": "string",
+                "description": "Optional default catalog for the session."
+              },
+              "schema": {
+                "type": "string",
+                "description": "Optional default schema for the session."
+              },
+              "maxRows": {
+                "type": "number",
+                "minimum": 1,
+                "description": "Optional per-connection row cap. Overrides sqlExplorer.query.maxRows."
+              }
+            }
+          }
+        },
         "trino.connections": {
           "type": "array",
           "default": [],
-          "description": "Saved Trino connections. Managed by the Connections view — passwords are kept in Secret Storage, not here.",
           "items": {
             "type": "object",
             "required": [
@@ -163,21 +209,36 @@
                 "description": "Optional per-connection row cap. Overrides trino.query.maxRows."
               }
             }
-          }
+          },
+          "markdownDeprecationMessage": "Superseded by `#sqlExplorer.connections#`. Existing values are migrated automatically."
+        },
+        "sqlExplorer.query.maxRows": {
+          "type": "number",
+          "default": 10000,
+          "minimum": 1,
+          "maximum": 1000000,
+          "markdownDescription": "Maximum rows fetched for any statement. The extension stops paging and cancels the query once this many rows have arrived, which bounds memory for queries without a `LIMIT`. A connection can override this in its own settings."
         },
         "trino.query.maxRows": {
           "type": "number",
           "default": 10000,
           "minimum": 1,
           "maximum": 1000000,
-          "markdownDescription": "Maximum rows fetched from Trino for any statement. The extension stops paging and cancels the query once this many rows have arrived, which bounds memory for queries without a `LIMIT`. A connection can override this in its own settings."
+          "markdownDeprecationMessage": "Superseded by `#sqlExplorer.query.maxRows#`. Existing values are migrated automatically."
+        },
+        "sqlExplorer.preview.rowLimit": {
+          "type": "number",
+          "default": 100,
+          "minimum": 1,
+          "maximum": 10000,
+          "description": "Number of rows fetched when previewing a table from the Connections view."
         },
         "trino.preview.rowLimit": {
           "type": "number",
           "default": 100,
           "minimum": 1,
           "maximum": 10000,
-          "description": "Number of rows fetched when previewing a table from the Connections view."
+          "markdownDeprecationMessage": "Superseded by `#sqlExplorer.preview.rowLimit#`. Existing values are migrated automatically."
         },
         "trino.connection.name": {
           "type": "string",
@@ -209,150 +270,150 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "trino",
-          "title": "Trino",
+          "id": "sqlExplorer",
+          "title": "SQL Explorer",
           "icon": "resources/trino.svg"
         }
       ]
     },
     "views": {
-      "trino": [
+      "sqlExplorer": [
         {
-          "id": "trinoCatalogs",
+          "id": "sqlExplorerConnections",
           "name": "Connections",
           "icon": "resources/trino.svg",
-          "contextualTitle": "Trino"
+          "contextualTitle": "SQL Explorer"
         }
       ]
     },
     "viewsWelcome": [
       {
-        "view": "trinoCatalogs",
-        "contents": "No Trino connections yet.\n[Add Connection](command:trino.addConnection)"
+        "view": "sqlExplorerConnections",
+        "contents": "No connections yet.\n[Add Connection](command:sqlExplorer.addConnection)"
       }
     ],
     "menus": {
       "commandPalette": [
         {
-          "command": "trino.setActiveConnection",
+          "command": "sqlExplorer.setActiveConnection",
           "when": "false"
         },
         {
-          "command": "trino.previewTable",
+          "command": "sqlExplorer.previewTable",
           "when": "false"
         },
         {
-          "command": "trino.tableClicked",
+          "command": "sqlExplorer.tableClicked",
           "when": "false"
         },
         {
-          "command": "trino.showTableDdl",
+          "command": "sqlExplorer.showTableDdl",
           "when": "false"
         },
         {
-          "command": "trino.refreshNode",
+          "command": "sqlExplorer.refreshNode",
           "when": "false"
         },
         {
-          "command": "trino.newQueryHere",
+          "command": "sqlExplorer.newQueryHere",
           "when": "false"
         },
         {
-          "command": "trino.runStatement",
+          "command": "sqlExplorer.runStatement",
           "when": "false"
         },
         {
-          "command": "trino.runStatementNewTab",
+          "command": "sqlExplorer.runStatementNewTab",
           "when": "false"
         }
       ],
       "view/title": [
         {
-          "command": "trino.addConnection",
-          "when": "view == trinoCatalogs",
+          "command": "sqlExplorer.addConnection",
+          "when": "view == sqlExplorerConnections",
           "group": "navigation@1"
         },
         {
-          "command": "trino.openQuery",
-          "when": "view == trinoCatalogs",
+          "command": "sqlExplorer.openQuery",
+          "when": "view == sqlExplorerConnections",
           "group": "navigation@2"
         },
         {
-          "command": "trino.refreshCatalogs",
-          "when": "view == trinoCatalogs",
+          "command": "sqlExplorer.refreshCatalogs",
+          "when": "view == sqlExplorerConnections",
           "group": "navigation@3"
         }
       ],
       "view/item/context": [
         {
-          "command": "trino.previewTable",
-          "when": "view == trinoCatalogs && viewItem =~ /^trino\\.(table|view)$/",
+          "command": "sqlExplorer.previewTable",
+          "when": "view == sqlExplorerConnections && viewItem =~ /^sqlExplorer\\.(table|view)$/",
           "group": "inline@1"
         },
         {
-          "command": "trino.previewTable",
-          "when": "view == trinoCatalogs && viewItem =~ /^trino\\.(table|view)$/",
+          "command": "sqlExplorer.previewTable",
+          "when": "view == sqlExplorerConnections && viewItem =~ /^sqlExplorer\\.(table|view)$/",
           "group": "1_table@1"
         },
         {
-          "command": "trino.showTableDdl",
-          "when": "view == trinoCatalogs && viewItem =~ /^trino\\.(table|view)$/",
+          "command": "sqlExplorer.showTableDdl",
+          "when": "view == sqlExplorerConnections && viewItem =~ /^sqlExplorer\\.(table|view)$/",
           "group": "1_table@2"
         },
         {
-          "command": "trino.newQueryHere",
-          "when": "view == trinoCatalogs && viewItem =~ /^trino\\.(catalog|schema|table|view)$/",
+          "command": "sqlExplorer.newQueryHere",
+          "when": "view == sqlExplorerConnections && viewItem =~ /^sqlExplorer\\.(catalog|schema|table|view)$/",
           "group": "inline@5"
         },
         {
-          "command": "trino.newQueryHere",
-          "when": "view == trinoCatalogs && viewItem =~ /^trino\\.(catalog|schema|table|view)$/",
+          "command": "sqlExplorer.newQueryHere",
+          "when": "view == sqlExplorerConnections && viewItem =~ /^sqlExplorer\\.(catalog|schema|table|view)$/",
           "group": "1_table@0"
         },
         {
-          "command": "trino.refreshNode",
-          "when": "view == trinoCatalogs && viewItem =~ /^trino\\.(catalog|schema|table|view|group)/",
+          "command": "sqlExplorer.refreshNode",
+          "when": "view == sqlExplorerConnections && viewItem =~ /^sqlExplorer\\.(catalog|schema|table|view|group)/",
           "group": "inline@9"
         },
         {
-          "command": "trino.refreshNode",
-          "when": "view == trinoCatalogs && viewItem =~ /^trino\\.(catalog|schema|table|view|group)/",
+          "command": "sqlExplorer.refreshNode",
+          "when": "view == sqlExplorerConnections && viewItem =~ /^sqlExplorer\\.(catalog|schema|table|view|group)/",
           "group": "9_refresh@1"
         },
         {
-          "command": "trino.refreshCatalogs",
-          "when": "view == trinoCatalogs && viewItem =~ /^trino\\.connection/",
+          "command": "sqlExplorer.refreshCatalogs",
+          "when": "view == sqlExplorerConnections && viewItem =~ /^sqlExplorer\\.connection/",
           "group": "inline@1"
         },
         {
-          "command": "trino.editConnection",
-          "when": "view == trinoCatalogs && viewItem =~ /^trino\\.connection/",
+          "command": "sqlExplorer.editConnection",
+          "when": "view == sqlExplorerConnections && viewItem =~ /^sqlExplorer\\.connection/",
           "group": "inline@2"
         },
         {
-          "command": "trino.setActiveConnection",
-          "when": "view == trinoCatalogs && viewItem == trino.connection",
+          "command": "sqlExplorer.setActiveConnection",
+          "when": "view == sqlExplorerConnections && viewItem == sqlExplorer.connection",
           "group": "1_connection@1"
         },
         {
-          "command": "trino.connect",
-          "when": "view == trinoCatalogs && viewItem =~ /^trino\\.connection/",
+          "command": "sqlExplorer.connect",
+          "when": "view == sqlExplorerConnections && viewItem =~ /^sqlExplorer\\.connection/",
           "group": "1_connection@2"
         },
         {
-          "command": "trino.editConnection",
-          "when": "view == trinoCatalogs && viewItem =~ /^trino\\.connection/",
+          "command": "sqlExplorer.editConnection",
+          "when": "view == sqlExplorerConnections && viewItem =~ /^sqlExplorer\\.connection/",
           "group": "2_manage@1"
         },
         {
-          "command": "trino.removeConnection",
-          "when": "view == trinoCatalogs && viewItem =~ /^trino\\.connection/",
+          "command": "sqlExplorer.removeConnection",
+          "when": "view == sqlExplorerConnections && viewItem =~ /^sqlExplorer\\.connection/",
           "group": "2_manage@2"
         }
       ],
       "editor/title": [
         {
-          "command": "trino.runActiveSql",
+          "command": "sqlExplorer.runActiveSql",
           "when": "resourceLangId == sql",
           "group": "navigation"
         }
@@ -360,7 +421,7 @@
     },
     "keybindings": [
       {
-        "command": "trino.runActiveSql",
+        "command": "sqlExplorer.runActiveSql",
         "key": "cmd+enter",
         "mac": "cmd+enter",
         "linux": "ctrl+enter",

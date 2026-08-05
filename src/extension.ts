@@ -23,7 +23,7 @@ export function activate(context: vscode.ExtensionContext): void {
         new RunningQueryStatus(running),
         vscode.languages.registerCompletionItemProvider({ language: 'sql' }, completions, '.'),
         store.onDidChange(() => completions.clear()),
-        vscode.window.createTreeView('trinoCatalogs', {
+        vscode.window.createTreeView('sqlExplorerConnections', {
             treeDataProvider: provider,
             dragAndDropController: new ExplorerDragController(),
             canSelectMany: true,
@@ -36,7 +36,7 @@ export function activate(context: vscode.ExtensionContext): void {
         vscode.window.onDidChangeVisibleTextEditors(() => status.decorate()),
         store.onDidChange(() => provider.refresh()),
         vscode.workspace.onDidChangeConfiguration(event => {
-            if (event.affectsConfiguration('trino.connections')) { provider.refresh(); }
+            if (event.affectsConfiguration('sqlExplorer.connections')) { provider.refresh(); }
         })
     );
 
@@ -44,38 +44,38 @@ export function activate(context: vscode.ExtensionContext): void {
         context.subscriptions.push(vscode.commands.registerCommand(command, handler));
     };
 
-    register('trino.addConnection', async () => {
+    register('sqlExplorer.addConnection', async () => {
         await showConnectionWindow(context, store, provider, undefined);
     });
-    register('trino.editConnection', async (item?: ExplorerItem) => {
+    register('sqlExplorer.editConnection', async (item?: ExplorerItem) => {
         const connection = store.get(item?.connectionId) ?? await pickConnection(store, 'Select a connection to edit');
         if (connection) { await showConnectionWindow(context, store, provider, connection); }
     });
-    register('trino.removeConnection', async (item?: ExplorerItem) => {
+    register('sqlExplorer.removeConnection', async (item?: ExplorerItem) => {
         const connection = store.get(item?.connectionId) ?? await pickConnection(store, 'Select a connection to remove');
         if (!connection) { return; }
         const confirmed = await vscode.window.showWarningMessage(
-            `Remove the Trino connection "${connection.name}"?`, { modal: true }, 'Remove'
+            `Remove the connection "${connection.name}"?`, { modal: true }, 'Remove'
         );
         if (confirmed !== 'Remove') { return; }
         await store.remove(connection.id);
         provider.forget(connection.id);
-        vscode.window.showInformationMessage(`Removed Trino connection "${connection.name}".`);
+        vscode.window.showInformationMessage(`Removed connection "${connection.name}".`);
     });
-    register('trino.setActiveConnection', async (item?: ExplorerItem) => {
+    register('sqlExplorer.setActiveConnection', async (item?: ExplorerItem) => {
         const connection = store.get(item?.connectionId) ?? await pickConnection(store, 'Select the connection to use for queries');
         if (connection) {
             await store.setActive(connection.id);
-            vscode.window.showInformationMessage(`Trino queries now run against "${connection.name}".`);
+            vscode.window.showInformationMessage(`Queries now run against "${connection.name}".`);
         }
     });
-    register('trino.connect', async (item?: ExplorerItem) => {
+    register('sqlExplorer.connect', async (item?: ExplorerItem) => {
         const connection = store.get(item?.connectionId) ?? await resolveConnection(store);
         if (!connection) { return; }
         try { await provider.connect(connection); }
         catch (error) { showConnectionError(error); }
     });
-    register('trino.refreshCatalogs', async (item?: ExplorerItem) => {
+    register('sqlExplorer.refreshCatalogs', async (item?: ExplorerItem) => {
         provider.forget(item?.connectionId);
         completions.clear();
         const connection = store.get(item?.connectionId);
@@ -83,7 +83,7 @@ export function activate(context: vscode.ExtensionContext): void {
         try { await provider.connect(connection); }
         catch (error) { showConnectionError(error); }
     });
-    register('trino.refreshNode', async (item?: ExplorerItem) => {
+    register('sqlExplorer.refreshNode', async (item?: ExplorerItem) => {
         if (!item) { return; }
         if (item.kind === 'connection' && item.connectionId) {
             provider.forget(item.connectionId);
@@ -98,31 +98,31 @@ export function activate(context: vscode.ExtensionContext): void {
         completions.clear();
         provider.refreshItem(item);
     });
-    register('trino.configureConnection', async () => {
+    register('sqlExplorer.configureConnection', async () => {
         const connection = store.get(store.activeId);
         await showConnectionWindow(context, store, provider, connection);
     });
-    register('trino.previewTable', async (item?: ExplorerItem) => {
+    register('sqlExplorer.previewTable', async (item?: ExplorerItem) => {
         await previewTable(store, context.secrets, tabs, running, item, true);
     });
-    register('trino.tableClicked', async (item?: ExplorerItem) => {
+    register('sqlExplorer.tableClicked', async (item?: ExplorerItem) => {
         await previewTable(store, context.secrets, tabs, running, item);
     });
-    register('trino.newQueryHere', async (item?: ExplorerItem) => {
+    register('sqlExplorer.newQueryHere', async (item?: ExplorerItem) => {
         await openScopedQuery(store, item);
     });
-    register('trino.showTableDdl', async (item?: ExplorerItem) => {
+    register('sqlExplorer.showTableDdl', async (item?: ExplorerItem) => {
         await showTableDdl(store, context.secrets, tabs, running, item);
     });
-    register('trino.openQuery', async () => { await openSqlQueryEditor(store); });
-    register('trino.runActiveSql', async () => { await runActiveSql(store, context.secrets, status, tabs, running); });
-    register('trino.runStatement', async (args?: { uri?: string; sql?: string; line?: number }) => {
+    register('sqlExplorer.openQuery', async () => { await openSqlQueryEditor(store); });
+    register('sqlExplorer.runActiveSql', async () => { await runActiveSql(store, context.secrets, status, tabs, running); });
+    register('sqlExplorer.runStatement', async (args?: { uri?: string; sql?: string; line?: number }) => {
         await runStatement(store, context.secrets, status, tabs, running, args);
     });
-    register('trino.runStatementNewTab', async (args?: { uri?: string; sql?: string; line?: number }) => {
+    register('sqlExplorer.runStatementNewTab', async (args?: { uri?: string; sql?: string; line?: number }) => {
         await runStatement(store, context.secrets, status, tabs, running, args, true);
     });
-    register('trino.cancelQuery', async () => { await cancelRunningQuery(running); });
+    register('sqlExplorer.cancelQuery', async () => { await cancelRunningQuery(running); });
 }
 
 export function deactivate(): void {}

@@ -14,8 +14,8 @@ import { previewRowLimit, quoteIdentifier, showConnectionError, summarize } from
 export async function pickConnection(store: ConnectionStore, placeHolder: string): Promise<StoredConnection | undefined> {
     const connections = store.all();
     if (!connections.length) {
-        vscode.window.showErrorMessage('Add a Trino connection first.', 'Add Connection')
-            .then(selection => { if (selection) { void vscode.commands.executeCommand('trino.addConnection'); } });
+        vscode.window.showErrorMessage('Add a connection first.', 'Add Connection')
+            .then(selection => { if (selection) { void vscode.commands.executeCommand('sqlExplorer.addConnection'); } });
         return undefined;
     }
     if (connections.length === 1) { return connections[0]; }
@@ -30,7 +30,7 @@ export async function pickConnection(store: ConnectionStore, placeHolder: string
 export async function resolveConnection(store: ConnectionStore): Promise<StoredConnection | undefined> {
     const active = store.get(store.activeId);
     if (active) { return active; }
-    const connection = await pickConnection(store, 'Select a Trino connection');
+    const connection = await pickConnection(store, 'Select a connection');
     if (connection) { await store.setActive(connection.id); }
     return connection;
 }
@@ -91,14 +91,14 @@ export async function showTableDdl(
     if (!connection || !item?.catalog || !item.schema || !item.table) { return; }
     const results = tabs.primary(`${item.schema}.${item.table}`);
     const qualified = `${quoteIdentifier(item.catalog)}.${quoteIdentifier(item.schema)}.${quoteIdentifier(item.table)}`;
-    const isView = item.contextValue === 'trino.view';
+    const isView = item.contextValue === 'sqlExplorer.view';
     try {
         const ddl = await vscode.window.withProgress(
             { location: vscode.ProgressLocation.Notification, title: `Fetching DDL for ${item.table}…`, cancellable: true },
             (_, token) => new TrinoClient(secrets, connection, registry).tableDdl(item.catalog!, item.schema!, item.table!, isView, token)
         );
         if (!ddl) {
-            vscode.window.showWarningMessage(`Trino returned no DDL for ${item.catalog}.${item.schema}.${item.table}.`);
+            vscode.window.showWarningMessage(`No DDL returned for ${item.catalog}.${item.schema}.${item.table}.`);
             return;
         }
         const document = await vscode.workspace.openTextDocument({
@@ -147,7 +147,7 @@ export async function openSqlQueryEditor(store: ConnectionStore): Promise<void> 
 export async function runActiveSql(store: ConnectionStore, secrets: vscode.SecretStorage, status: QueryStatusProvider, tabs: ResultsTabs, registry: RunningQueryRegistry): Promise<void> {
     const editor = vscode.window.activeTextEditor;
     if (!editor || editor.document.languageId !== 'sql') {
-        vscode.window.showErrorMessage('Open a Trino SQL query editor before running a query.');
+        vscode.window.showErrorMessage('Open a SQL query editor before running a query.');
         return;
     }
     const selectedSql = editor.document.getText(editor.selection).trim();
@@ -230,7 +230,7 @@ export function tabTitle(sql: string): string {
     const parts = from?.match(new RegExp(part, 'g'))
         ?.map(name => name.replace(/^"|"$/g, '').replace(/""/g, '"')) ?? [];
     // The last two levels identify the table without the noise of the catalog.
-    return parts.length ? parts.slice(-2).join('.') : 'Trino Results';
+    return parts.length ? parts.slice(-2).join('.') : 'Results';
 }
 
 export function firstStatementLine(document: vscode.TextDocument): number {

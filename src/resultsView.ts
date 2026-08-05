@@ -112,7 +112,7 @@ function adjacentGroupColumn(): vscode.ViewColumn {
 /** A results grid in its own editor tab. */
 export class ResultsTabPanel extends ResultsSurface {
     private panel: vscode.WebviewPanel | undefined;
-    private title = 'Trino Results';
+    private title = 'Results';
     private column: vscode.ViewColumn | undefined;
 
     protected webview(): vscode.Webview | undefined { return this.panel?.webview; }
@@ -131,7 +131,7 @@ export class ResultsTabPanel extends ResultsSurface {
     protected async reveal(): Promise<void> {
         if (!this.panel) {
             this.panel = vscode.window.createWebviewPanel(
-                'trinoResults',
+                'sqlExplorerResults',
                 this.title,
                 // Keep the caret in the editor so its timing CodeLens redraws at once.
                 { viewColumn: this.column ?? adjacentGroupColumn(), preserveFocus: true },
