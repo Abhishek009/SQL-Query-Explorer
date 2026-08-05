@@ -49,7 +49,7 @@ Details:
 - Long-running statements show a cancellable progress indicator and abort the underlying request when cancelled.
 
 ### Results
-Results open in an editor tab beside your query. `Run` reuses one tab; `New Tab` opens another so results can be compared side by side.
+Results open in an editor tab **below** your query. `Run` reuses one tab; `New Tab` opens another so results can be compared. Set `trino.results.position` to `beside` for a side-by-side split instead.
 
 - **Sortable columns** — click a header to cycle ascending → descending → unsorted. Numbers sort numerically, text case-insensitively, and NULLs always sort last.
 - **Resizable columns** — drag a header edge; double-click it to reset.
@@ -88,6 +88,7 @@ Queries without a `LIMIT` could otherwise pull an entire table into memory. The 
 | `trino.connections` | `[]` | Saved connections. Managed by the Connections view; passwords are kept in Secret Storage, not here. |
 | `trino.query.maxRows` | `10000` | Hard cap on rows fetched for any statement. A connection can override it. |
 | `trino.preview.rowLimit` | `100` | Rows shown in the results grid, and fetched for a table preview. |
+| `trino.results.position` | `below` | Whether a results tab opens below the query (horizontal split) or beside it. |
 
 The older `trino.connection.*` settings are deprecated. Existing values are migrated into `trino.connections` automatically on first run.
 
