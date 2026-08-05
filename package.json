@@ -1,5 +1,5 @@
 {
-  "name": "trino-explorer",
+  "name": "sql-explorer",
   "displayName": "SQL Explorer",
   "publisher": "big-tech-talk",
   "description": "Browse schemas and run SQL from VS Code. Supports Trino today, with more engines to follow.",
@@ -7,12 +7,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Abhishek009/trino-plugin.git"
+    "url": "https://github.com/Abhishek009/sql-explorer.git"
   },
   "bugs": {
-    "url": "https://github.com/Abhishek009/trino-plugin/issues"
+    "url": "https://github.com/Abhishek009/sql-explorer/issues"
   },
-  "homepage": "https://github.com/Abhishek009/trino-plugin#readme",
+  "homepage": "https://github.com/Abhishek009/sql-explorer#readme",
   "icon": "icon.png",
   "engines": {
     "vscode": "^1.85.0"
