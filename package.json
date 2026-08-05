@@ -172,19 +172,6 @@
           "maximum": 1000000,
           "markdownDescription": "Maximum rows fetched from Trino for any statement. The extension stops paging and cancels the query once this many rows have arrived, which bounds memory for queries without a `LIMIT`. A connection can override this in its own settings."
         },
-        "trino.results.position": {
-          "type": "string",
-          "default": "below",
-          "enum": [
-            "below",
-            "beside"
-          ],
-          "enumDescriptions": [
-            "Stack the results under the query editor (horizontal split).",
-            "Open the results in the column to the right (vertical split)."
-          ],
-          "description": "Where a results tab opens relative to the query editor."
-        },
         "trino.preview.rowLimit": {
           "type": "number",
           "default": 100,

@@ -94,24 +94,6 @@ export abstract class ResultsSurface {
     }
 }
 
-/**
- * `ViewColumn.Beside` always opens a column to the right, so the results land in
- * a vertical split. Switching the editor grid to two rows stacks them instead,
- * putting the results under the query. Best effort: layout commands are part of
- * the workbench, not the extension API, so a failure just leaves the split as is.
- */
-async function stackResultsBelow(): Promise<void> {
-    if (resultsPosition() !== 'below') { return; }
-    try { await vscode.commands.executeCommand('workbench.action.editorLayoutTwoRows'); }
-    catch { /* keep the side-by-side split rather than failing the query */ }
-}
-
-export function resultsPosition(): 'below' | 'beside' {
-    return vscode.workspace.getConfiguration('trino').get<string>('results.position') === 'beside'
-        ? 'beside'
-        : 'below';
-}
-
 /** A results grid in its own editor tab. */
 export class ResultsTabPanel extends ResultsSurface {
     private panel: vscode.WebviewPanel | undefined;
@@ -136,7 +118,6 @@ export class ResultsTabPanel extends ResultsSurface {
             );
             this.panel.webview.onDidReceiveMessage((message: unknown) => void this.handle(message));
             this.panel.onDidDispose(() => { this.panel = undefined; });
-            await stackResultsBelow();
         } else {
             this.panel.reveal(undefined, true);
         }
