@@ -1,4 +1,4 @@
-# SQL Explorer
+# SQL Query Explorer
 
 A VS Code extension for browsing database schemas and running SQL without leaving the editor.
 
@@ -101,7 +101,7 @@ Settings previously named `trino.*` are deprecated but still read: values are mi
    npm run compile
    ```
    Then open the project in VS Code and press `F5` to launch the Extension Development Host.
-2. Select the SQL Explorer icon in the Activity Bar, then **+** (or **Add Connection**).
+2. Select the SQL Query Explorer icon in the Activity Bar, then **+** (or **Add Connection**).
 3. Enter the host, port, SSL/HTTPS choice, and user, plus an optional password. You can also paste a full `jdbc:trino://…` or `http(s)://…` URL into **Host** and let the other fields populate themselves.
 4. Select **Save & Connect**.
 5. Expand a catalog to browse schemas, tables, and columns. Double-click a table to preview its data.

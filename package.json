@@ -1,9 +1,9 @@
 {
-  "name": "sql-explorer",
-  "displayName": "SQL Explorer",
+  "name": "trino-explorer",
+  "displayName": "SQL Query Explorer",
   "publisher": "big-tech-talk",
   "description": "Browse schemas and run SQL from VS Code. Supports Trino today, with more engines to follow.",
-  "version": "1.0.6",
+  "version": "1.0.7",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -120,7 +120,7 @@
       }
     ],
     "configuration": {
-      "title": "SQL Explorer",
+      "title": "SQL Query Explorer",
       "properties": {
         "sqlExplorer.connections": {
           "type": "array",
@@ -271,7 +271,7 @@
       "activitybar": [
         {
           "id": "sqlExplorer",
-          "title": "SQL Explorer",
+          "title": "SQL Query Explorer",
           "icon": "resources/trino.svg"
         }
       ]
@@ -282,7 +282,7 @@
           "id": "sqlExplorerConnections",
           "name": "Connections",
           "icon": "resources/trino.svg",
-          "contextualTitle": "SQL Explorer"
+          "contextualTitle": "SQL Query Explorer"
         }
       ]
     },
