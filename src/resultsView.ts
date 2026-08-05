@@ -94,12 +94,33 @@ export abstract class ResultsSurface {
     }
 }
 
+/**
+ * The column a new results tab should open in. Splitting the window again when
+ * a second group already exists (a chat panel, another editor) is rarely what
+ * anyone wants, so reuse that group and become another tab in it.
+ */
+function adjacentGroupColumn(): vscode.ViewColumn {
+    const groups = vscode.window.tabGroups?.all ?? [];
+    // Anchor on the query editor rather than the focused group: results must not
+    // land on top of the SQL file, even when the chat panel has focus.
+    const queryColumn = vscode.window.activeTextEditor?.viewColumn
+        ?? vscode.window.tabGroups?.activeTabGroup?.viewColumn;
+    const other = groups.find(group => group.viewColumn !== undefined && group.viewColumn !== queryColumn);
+    return other?.viewColumn ?? vscode.ViewColumn.Beside;
+}
+
 /** A results grid in its own editor tab. */
 export class ResultsTabPanel extends ResultsSurface {
     private panel: vscode.WebviewPanel | undefined;
     private title = 'Trino Results';
+    private column: vscode.ViewColumn | undefined;
 
     protected webview(): vscode.Webview | undefined { return this.panel?.webview; }
+
+    /** Where the tab lives now, so sibling results can join the same group. */
+    public get viewColumn(): vscode.ViewColumn | undefined { return this.panel?.viewColumn; }
+
+    public preferColumn(column: vscode.ViewColumn | undefined): void { this.column = column; }
 
     /** Names the tab after the query, so several results stay tellable apart. */
     public retitle(title: string): void {
@@ -113,7 +134,7 @@ export class ResultsTabPanel extends ResultsSurface {
                 'trinoResults',
                 this.title,
                 // Keep the caret in the editor so its timing CodeLens redraws at once.
-                { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
+                { viewColumn: this.column ?? adjacentGroupColumn(), preserveFocus: true },
                 { enableScripts: true, retainContextWhenHidden: true }
             );
             this.panel.webview.onDidReceiveMessage((message: unknown) => void this.handle(message));
@@ -138,14 +159,22 @@ export class ResultsTabs implements vscode.Disposable {
     public primary(title: string): ResultsTabPanel {
         if (!this.shared) { this.shared = new ResultsTabPanel(); }
         this.shared.retitle(title);
+        this.shared.preferColumn(this.resultsColumn());
         return this.shared;
     }
 
     public additional(title: string): ResultsTabPanel {
         const panel = new ResultsTabPanel();
         panel.retitle(title);
+        // Open beside the results already on screen, not in a fresh split.
+        panel.preferColumn(this.resultsColumn());
         this.extras.push(panel);
         return panel;
+    }
+
+    /** The group results already occupy, wherever the user moved it to. */
+    private resultsColumn(): vscode.ViewColumn | undefined {
+        return this.shared?.viewColumn ?? this.extras.map(panel => panel.viewColumn).find(Boolean);
     }
 
     public dispose(): void {

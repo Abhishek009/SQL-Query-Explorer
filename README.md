@@ -49,7 +49,7 @@ Details:
 - Long-running statements show a cancellable progress indicator and abort the underlying request when cancelled.
 
 ### Results
-Results open in an editor tab beside your query. `Run` reuses one tab; `New Tab` opens another so results can be compared. The tab is an ordinary editor, so you can drag it anywhere — another group, a split below, or the Secondary Side Bar next to Chat — and VS Code remembers the position.
+Results open in an editor tab beside your query. `Run` reuses one tab; `New Tab` opens another so results can be compared. If another editor group is already open — a chat panel, a second file — results become a tab **in that group** rather than splitting the window again. The tab is an ordinary editor, so you can drag it anywhere and VS Code remembers the position; later results follow it there.
 
 - **Sortable columns** — click a header to cycle ascending → descending → unsorted. Numbers sort numerically, text case-insensitively, and NULLs always sort last.
 - **Resizable columns** — drag a header edge; double-click it to reset.
