@@ -43,9 +43,9 @@ Details:
 - **Right-click a table or view → Show Table DDL** to open its `SHOW CREATE TABLE` / `SHOW CREATE VIEW` output in a SQL editor.
 
 ### SQL editor and execution
-- **Trino: New SQL Query** opens a native VS Code SQL editor, so normal editing, syntax highlighting, and GitHub Copilot all work.
+- **SQL: New SQL Query** opens a native VS Code SQL editor, so normal editing, syntax highlighting, and GitHub Copilot all work.
 - **Run / New Tab actions above every statement** — `Run` reuses a single results tab, so repeated runs replace it in place; `New Tab` opens a separate tab that later runs leave alone. Tabs are named after the table, e.g. `sf1.customer`.
-- **Trino: Run SQL Query** from the editor title bar or `Cmd+Enter` / `Ctrl+Enter`. If text is selected only the selection runs; otherwise the whole editor runs.
+- **SQL: Run SQL Query** from the editor title bar or `Cmd+Enter` / `Ctrl+Enter`. If text is selected only the selection runs; otherwise the whole editor runs.
 - **Autocomplete from live metadata** — typing `tpch.` suggests schemas, `tpch.sf1.` suggests tables, and `tpch.sf1.customer.` suggests columns with their types. Results are cached briefly and refresh with the connection.
 - **Execution feedback in the editor**: a timing line above the statement (`✓ 619ms · 1,500 row(s)`) plus a green tick or red cross in the gutter.
 - Long-running statements show a cancellable progress indicator and abort the underlying request when cancelled.
@@ -105,7 +105,7 @@ Settings previously named `trino.*` are deprecated but still read: values are mi
 3. Enter the host, port, SSL/HTTPS choice, and user, plus an optional password. You can also paste a full `jdbc:trino://…` or `http(s)://…` URL into **Host** and let the other fields populate themselves.
 4. Select **Save & Connect**.
 5. Expand a catalog to browse schemas, tables, and columns. Double-click a table to preview its data.
-6. Run **Trino: New SQL Query**, write a statement, and execute it with `Cmd+Enter` / `Ctrl+Enter`.
+6. Run **SQL: New SQL Query**, write a statement, and execute it with `Cmd+Enter` / `Ctrl+Enter`.
 
 ## Roadmap
 
