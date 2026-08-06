@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
-import { parseTrinoUrl, splitHostPort } from './urls';
+import { trinoFieldsHtml } from './engines/trino/trinoConnectionFields';
+import { postgresFieldsHtml } from './engines/postgres/postgresConnectionFields';
 
 export interface ConnectionFormData {
     name: string;
@@ -27,29 +28,6 @@ export function isConnectionMessage(value: unknown): value is ConnectionMessage 
     return typeof value === 'object' && value !== null && (type === 'save' || type === 'test');
 }
 
-/**
- * Lets the Host field accept a whole URL — pasting jdbc:trino://host:port/catalog
- * fills in the host, port, SSL, catalog, schema, and user instead of failing.
- * Values already typed into those fields win over the ones in the URL.
- */
-export function expandPastedUrl(message: ConnectionMessage): ConnectionMessage {
-    const parsed = parseTrinoUrl(message.host);
-    if (!parsed) {
-        // No scheme, so it is a plain host — but it may still carry a port.
-        const { host, port } = splitHostPort(message.host);
-        return { ...message, host, port: port ?? message.port };
-    }
-    return {
-        ...message,
-        host: parsed.host,
-        port: parsed.port ?? message.port,
-        sslEnabled: parsed.sslEnabled ?? message.sslEnabled,
-        user: message.user.trim() || parsed.user,
-        catalog: message.catalog.trim() || parsed.catalog,
-        schema: message.schema.trim() || parsed.schema
-    };
-}
-
 /** Blank means "use the global cap", so an empty field stores nothing. */
 export function parseMaxRows(value: string): number | undefined {
     const parsed = Number(value.trim());
@@ -64,38 +42,42 @@ export function validateConnection(value: ConnectionMessage): string | undefined
     return undefined;
 }
 
+const BLANK: ConnectionFormData = {
+    name: '', engine: 'trino', host: '', port: '', sslEnabled: false,
+    user: '', catalog: '', schema: '', database: '', maxRows: ''
+};
+
 export function connectionFormHtml(webview: vscode.Webview, values: ConnectionFormData, isEdit: boolean, hasPassword: boolean): string {
     const nonce = String(Date.now());
-    const escape = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
     const passwordHint = hasPassword ? 'Leave blank to keep the saved password' : 'Optional';
-    const forgetRow = hasPassword
-        ? '<label class="switch small"><input id="clearPassword" type="checkbox"><span class="track"></span><span class="switch-label">Forget the saved password</span></label>'
-        : '<input id="clearPassword" type="checkbox" hidden>';
-    const advancedOpen = values.catalog || values.schema || values.maxRows ? ' open' : '';
+    // Only the active engine's pane gets the real values; the other starts
+    // blank rather than showing data that belongs to a different connection.
+    const trinoValues = values.engine === 'trino' ? values : { ...BLANK, engine: 'trino' as const };
+    const postgresValues = values.engine === 'postgres' ? values : { ...BLANK, engine: 'postgres' as const };
 
     const styles = `
-:root{--gap:18px;--radius:6px}
+:root{--gap:12px;--radius:6px}
 *{box-sizing:border-box}
-body{color:var(--vscode-foreground);font-family:var(--vscode-font-family);font-size:13px;margin:0;padding:28px 20px 96px}
-.page{max-width:640px;margin:0 auto}
-.head{display:flex;align-items:flex-start;gap:14px;margin-bottom:22px}
-.badge{flex:0 0 auto;width:38px;height:38px;border-radius:10px;display:grid;place-items:center;font-size:17px;font-weight:700;color:#fff;background:linear-gradient(135deg,#2f7ce0,#1f4fa8);box-shadow:0 2px 8px rgba(0,0,0,.25)}
-h1{font-size:1.32em;margin:0 0 4px;font-weight:600;letter-spacing:-.01em}
-.sub{margin:0;color:var(--vscode-descriptionForeground);line-height:1.5}
-.card{border:1px solid var(--vscode-panel-border,rgba(128,128,128,.32));border-radius:var(--radius);background:var(--vscode-editorWidget-background,rgba(128,128,128,.05));padding:16px 18px 20px;margin-bottom:14px}
-.card-title{display:flex;align-items:center;gap:8px;font-size:.78em;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--vscode-descriptionForeground);margin:0 0 14px}
-.card-title::after{content:"";flex:1 1 auto;height:1px;background:var(--vscode-panel-border,rgba(128,128,128,.25))}
+body{color:var(--vscode-foreground);font-family:var(--vscode-font-family);font-size:13px;margin:0;padding:22px 20px 96px}
+.page{max-width:560px;margin:0 auto}
+.head{display:flex;align-items:center;gap:14px;margin-bottom:18px}
+.badge{flex:0 0 auto;width:44px;height:44px;border-radius:11px;display:grid;place-items:center;color:#fff;background:linear-gradient(135deg,#2f7ce0,#1f4fa8);box-shadow:0 2px 8px rgba(0,0,0,.25)}
+.badge svg{width:24px;height:24px}
+h1{font-size:1.42em;margin:0;font-weight:600;letter-spacing:-.01em}
+.card{border:1px solid var(--vscode-panel-border,rgba(128,128,128,.32));border-radius:var(--radius);background:var(--vscode-editorWidget-background,rgba(128,128,128,.05));padding:16px}
+.card.compact{padding:14px 16px}
 .field{margin-bottom:var(--gap)}
 .field:last-child{margin-bottom:0}
-label.lbl{display:block;margin:0 0 6px;font-weight:600}
+label.lbl{display:block;margin:0 0 5px;font-weight:600;font-size:.95em}
 .req{color:var(--vscode-charts-red,#e5534b);margin-left:2px}
-input[type=text],input[type=password],input[type=number],input:not([type]){width:100%;padding:7px 10px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,rgba(128,128,128,.5));border-radius:4px;font-family:inherit;font-size:13px;transition:border-color .12s,box-shadow .12s}
+input[type=text],input[type=password],input[type=number],input:not([type]){width:100%;padding:6px 9px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,rgba(128,128,128,.5));border-radius:4px;font-family:inherit;font-size:13px;transition:border-color .12s,box-shadow .12s}
 input::placeholder{color:var(--vscode-input-placeholderForeground,rgba(128,128,128,.75))}
 input:hover{border-color:var(--vscode-inputOption-hoverBackground,rgba(128,128,128,.7))}
 input:focus{outline:none;border-color:var(--vscode-focusBorder,#2f7ce0);box-shadow:0 0 0 2px color-mix(in srgb,var(--vscode-focusBorder,#2f7ce0) 30%,transparent)}
-.hint{margin:6px 0 0;font-size:.9em;color:var(--vscode-descriptionForeground);line-height:1.45}
-.row{display:grid;grid-template-columns:minmax(0,1fr) 130px;gap:12px}
-.switch{display:flex;align-items:center;gap:10px;cursor:pointer;user-select:none;margin:0}
+.hint{margin:5px 0 0;font-size:.87em;color:var(--vscode-descriptionForeground);line-height:1.4}
+.row{display:grid;grid-template-columns:minmax(0,1fr) 110px;gap:10px}
+.row-eq{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.switch{display:flex;align-items:center;gap:10px;cursor:pointer;user-select:none;margin:var(--gap) 0 0}
 .switch input{position:absolute;opacity:0;width:0;height:0}
 .track{position:relative;flex:0 0 auto;width:34px;height:19px;border-radius:19px;background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,rgba(128,128,128,.6));transition:background .15s,border-color .15s}
 .track::after{content:"";position:absolute;top:2px;left:2px;width:13px;height:13px;border-radius:50%;background:var(--vscode-descriptionForeground);transition:transform .15s,background .15s}
@@ -104,123 +86,76 @@ input:focus{outline:none;border-color:var(--vscode-focusBorder,#2f7ce0);box-shad
 .switch input:focus-visible+.track{box-shadow:0 0 0 2px color-mix(in srgb,var(--vscode-focusBorder,#2f7ce0) 45%,transparent)}
 .switch-label{font-weight:600}
 .switch.small .switch-label{font-weight:400;color:var(--vscode-descriptionForeground)}
-.switch.small{margin-top:10px}
-details{border-top:1px solid var(--vscode-panel-border,rgba(128,128,128,.22));margin-top:2px;padding-top:12px}
-summary{cursor:pointer;font-weight:600;list-style:none;display:flex;align-items:center;gap:7px;color:var(--vscode-foreground)}
+.switch.small{margin-top:6px}
+details.advanced{border:1px solid var(--vscode-panel-border,rgba(128,128,128,.32));border-radius:var(--radius);background:var(--vscode-editorWidget-background,rgba(128,128,128,.05));padding:10px 16px;margin-top:12px}
+details.advanced[open]{padding-bottom:14px}
+summary{cursor:pointer;font-weight:600;list-style:none;display:flex;align-items:center;gap:7px;color:var(--vscode-foreground);padding:2px 0}
 summary::-webkit-details-marker{display:none}
 summary::before{content:"\\25B8";display:inline-block;transition:transform .15s;color:var(--vscode-descriptionForeground)}
 details[open] summary::before{transform:rotate(90deg)}
-.details-body{margin-top:16px}
+details.advanced .field{margin-top:12px;margin-bottom:0}
 code{background:var(--vscode-textCodeBlock-background,rgba(128,128,128,.16));padding:1px 5px;border-radius:3px;font-family:var(--vscode-editor-font-family,monospace);font-size:.92em}
 .alert{display:none;align-items:flex-start;gap:8px;margin-bottom:14px;padding:9px 12px;border-radius:4px;color:var(--vscode-inputValidation-errorForeground,var(--vscode-foreground));background:var(--vscode-inputValidation-errorBackground,rgba(190,60,60,.16));border:1px solid var(--vscode-inputValidation-errorBorder,rgba(190,60,60,.7))}
 .alert.show{display:flex}
-select{width:100%;padding:7px 10px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,rgba(128,128,128,.5));border-radius:4px;font-family:inherit;font-size:13px}
-select:focus{outline:none;border-color:var(--vscode-focusBorder,#2f7ce0)}
 .result{display:none;align-items:flex-start;gap:8px;margin-top:12px;padding:9px 12px;border-radius:4px;font-size:.95em;white-space:pre-wrap;word-break:break-word}
 .result.show{display:flex}
 .result.ok{color:var(--vscode-testing-iconPassed,#2ea043);background:rgba(46,160,67,.12);border:1px solid rgba(46,160,67,.5)}
 .result.bad{color:var(--vscode-inputValidation-errorForeground,var(--vscode-foreground));background:var(--vscode-inputValidation-errorBackground,rgba(190,60,60,.16));border:1px solid var(--vscode-inputValidation-errorBorder,rgba(190,60,60,.7))}
 .result.busy{color:var(--vscode-descriptionForeground);background:rgba(128,128,128,.12);border:1px solid var(--vscode-panel-border,rgba(128,128,128,.35))}
-[data-engine]{display:none}
 .alert::before{content:"\\26A0";flex:0 0 auto}
 .actions{position:fixed;left:0;right:0;bottom:0;display:flex;justify-content:flex-end;gap:10px;padding:14px 20px;background:var(--vscode-editor-background,#1f1f1f);border-top:1px solid var(--vscode-panel-border,rgba(128,128,128,.3))}
 .actions-inner{width:100%;max-width:640px;margin:0 auto;display:flex;justify-content:flex-end;gap:10px}
+.tabs-label{margin:0 0 8px;font-size:.78em;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--vscode-descriptionForeground)}
+.tabs{display:flex;align-items:center;flex-wrap:wrap;gap:2px;margin-bottom:20px;padding-bottom:10px;border-bottom:1px solid var(--vscode-panel-border,rgba(128,128,128,.3))}
+.tab{appearance:none;border:0;background:transparent;padding:5px 9px;font-family:inherit;font-size:13px;font-weight:600;color:var(--vscode-descriptionForeground);cursor:pointer;border-bottom:2px solid transparent;display:inline-flex;align-items:center;gap:6px;border-radius:4px}
+.tab:hover{color:var(--vscode-foreground);background:var(--vscode-toolbar-hoverBackground,rgba(128,128,128,.12))}
+.tab.active{color:var(--vscode-foreground);border-bottom-color:var(--vscode-focusBorder,#2f7ce0)}
+.tab-icon{flex:0 0 auto;width:15px;height:15px;border-radius:4px;display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#fff;line-height:1}
+.tab-sep{width:1px;align-self:stretch;background:var(--vscode-panel-border,rgba(128,128,128,.35));margin:2px 4px}
+.pane{display:none}
+.pane.active{display:block}
+.soon{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:44px 20px;color:var(--vscode-descriptionForeground);text-align:center}
+.soon strong{color:var(--vscode-foreground);font-size:1.02em}
 button{padding:7px 18px;border:0;border-radius:4px;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;color:var(--vscode-button-foreground);background:var(--vscode-button-background)}
 button:hover{background:var(--vscode-button-hoverBackground)}
 button.secondary{color:var(--vscode-button-secondaryForeground,var(--vscode-foreground));background:var(--vscode-button-secondaryBackground,transparent);border:1px solid var(--vscode-panel-border,rgba(128,128,128,.45))}
 button.secondary:hover{background:var(--vscode-button-secondaryHoverBackground,rgba(128,128,128,.16))}
 button:focus-visible{outline:2px solid var(--vscode-focusBorder,#2f7ce0);outline-offset:2px}
-@media(max-width:520px){.row{grid-template-columns:1fr}}`;
+@media(max-width:520px){.row,.row-eq{grid-template-columns:1fr}}`;
 
     const body = `
 <div class="page">
   <div class="head">
-    <div class="badge">T</div>
+    <div class="badge"><svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path fill="#fff" d="M3 4h18v4H3zm3 6h12v4H6zm3 6h6v4H9z"/></svg></div>
     <div>
-      <h1>${isEdit ? 'Edit connection' : 'New Trino connection'}</h1>
-      <p class="sub">Point the explorer at a Trino coordinator. </p>
+      <h1>${isEdit ? 'Edit connection' : 'Connect To DB'}</h1>
     </div>
   </div>
   <div id="error" class="alert" role="alert"></div>
+  <p class="tabs-label">Server Type</p>
+  <div class="tabs" role="tablist">
+    <button type="button" class="tab${values.engine === 'postgres' ? '' : ' active'}" data-pane="trino" data-engine="trino" role="tab" aria-selected="${values.engine === 'postgres' ? 'false' : 'true'}"><span class="tab-icon" style="background:#dd4b39">T</span>Trino</button>
+    <button type="button" class="tab${values.engine === 'postgres' ? ' active' : ''}" data-pane="postgres" data-engine="postgres" role="tab" aria-selected="${values.engine === 'postgres' ? 'true' : 'false'}"><span class="tab-icon" style="background:#336791">P</span>PostgreSQL</button>
+    <span class="tab-sep"></span>
+    <button type="button" class="tab" data-pane="ssh" role="tab" aria-selected="false"><span class="tab-icon" style="background:#6e7681">⇄</span>SSH Tunnel</button>
+    <button type="button" class="tab" data-pane="socks" role="tab" aria-selected="false"><span class="tab-icon" style="background:#c9822a">S</span>Socks Proxy</button>
+    <button type="button" class="tab" data-pane="http" role="tab" aria-selected="false"><span class="tab-icon" style="background:#3f9142">H</span>HTTP Proxy</button>
+  </div>
   <form id="connection">
-    <section class="card">
-      <h2 class="card-title">Coordinator</h2>
-      <div class="field">
-        <label class="lbl" for="engine">Database</label>
-        <select id="engine">
-          <option value="trino"${values.engine === 'postgres' ? '' : ' selected'}>Trino</option>
-          <option value="postgres"${values.engine === 'postgres' ? ' selected' : ''}>PostgreSQL</option>
-        </select>
-        <p class="hint">Choosing an engine changes the fields below.</p>
-      </div>
-      <div class="field">
-        <label class="lbl" for="name">Connection name</label>
-        <input id="name" value="${escape(values.name)}" placeholder="Development database">
-        <p class="hint">Shown in the Connections view.</p>
-      </div>
-      <div class="field row">
-        <div>
-          <label class="lbl" for="host">Host<span class="req">*</span></label>
-          <input id="host" value="${escape(values.host)}" placeholder="trino.example.com" required>
-        </div>
-        <div>
-          <label class="lbl" for="port">Port<span class="req">*</span></label>
-          <input id="port" type="number" min="1" max="65535" value="${escape(values.port)}" required>
-        </div>
-      </div>
-      <div class="field" data-engine="postgres">
-        <label class="lbl" for="database">Database</label>
-        <input id="database" value="${escape(values.database)}" placeholder="postgres">
-        <p class="hint">The database to open. Others on the same server are still browsable in the tree.</p>
-      </div>
-      <label class="switch">
-        <input id="sslEnabled" type="checkbox" ${values.sslEnabled ? 'checked' : ''}>
-        <span class="track"></span>
-        <span class="switch-label">Enable SSL / TLS</span>
-      </label>
-      <p class="hint" data-engine="trino">Required when the coordinator serves TLS. Ports 443 and 8443 enable this automatically.</p>
-      <p class="hint" data-engine="postgres">Use TLS to reach the server. Required by most hosted Postgres providers.</p>
-    </section>
-
-    <section class="card">
-      <h2 class="card-title">Authentication</h2>
-      <div class="field">
-        <label class="lbl" for="user">User<span class="req">*</span></label>
-        <input id="user" value="${escape(values.user)}" required placeholder="your.username">
-        <p class="hint" data-engine="trino">Sent as the <code>X-Trino-User</code> header.</p>
-        <p class="hint" data-engine="postgres">The Postgres role to connect as.</p>
-      </div>
-      <div class="field">
-        <label class="lbl" for="password">Password</label>
-        <input id="password" type="password" autocomplete="new-password" placeholder="${passwordHint}">
-        <p class="hint">Stored in VS Code Secret Storage, never in settings.json.</p>
-        ${forgetRow}
-      </div>
-    </section>
-
-    <section class="card">
-      <details${advancedOpen}>
-        <summary>Session defaults and limits</summary>
-        <div class="details-body">
-          <div class="field row" data-engine="trino">
-            <div>
-              <label class="lbl" for="catalog">Default catalog</label>
-              <input id="catalog" value="${escape(values.catalog)}" placeholder="hive">
-            </div>
-            <div>
-              <label class="lbl" for="schema">Default schema</label>
-              <input id="schema" value="${escape(values.schema)}" placeholder="default">
-            </div>
-          </div>
-          <div class="field">
-            <label class="lbl" for="maxRows">Maximum rows to fetch</label>
-            <input id="maxRows" type="number" min="1" max="1000000" value="${escape(values.maxRows)}" placeholder="Leave blank to use the global setting">
-            <p class="hint">Caps how many rows are pulled from a single statement. Blank uses <code>trino.query.maxRows</code>.</p>
-          </div>
-        </div>
-      </details>
-    </section>
-    <div id="result" class="result" role="status"></div>
+   <div class="pane${values.engine === 'postgres' ? '' : ' active'}" data-pane="trino">${trinoFieldsHtml(trinoValues, passwordHint, hasPassword)}
+   </div>
+   <div class="pane${values.engine === 'postgres' ? ' active' : ''}" data-pane="postgres">${postgresFieldsHtml(postgresValues, passwordHint, hasPassword)}
+   </div>
+   <div class="pane" data-pane="ssh">
+    <div class="soon"><strong>SSH Tunnel</strong><span>Route this connection through an SSH bastion. Not available yet.</span></div>
+   </div>
+   <div class="pane" data-pane="socks">
+    <div class="soon"><strong>Socks Proxy</strong><span>Connect through a SOCKS proxy. Not available yet.</span></div>
+   </div>
+   <div class="pane" data-pane="http">
+    <div class="soon"><strong>HTTP Proxy</strong><span>Connect through an HTTP proxy. Not available yet.</span></div>
+   </div>
+   <div id="result" class="result" role="status"></div>
   </form>
 </div>
 <div class="actions">
@@ -234,27 +169,36 @@ button:focus-visible{outline:2px solid var(--vscode-focusBorder,#2f7ce0);outline
     const script = `const vscode=acquireVsCodeApi();
 const byId=id=>document.getElementById(id);
 let connect=true;
+let engine='${values.engine === 'postgres' ? 'postgres' : 'trino'}';
 
-// Show only the fields that belong to the selected engine.
-function applyEngine(){
-  const engine=byId('engine').value;
-  document.querySelectorAll('[data-engine]').forEach(el=>{
-    el.style.display = el.dataset.engine===engine ? '' : 'none';
-  });
-  const port=byId('port');
-  if(!port.dataset.touched){ port.value = engine==='postgres' ? '5432' : '8080'; }
-}
-byId('engine').addEventListener('change',applyEngine);
-byId('port').addEventListener('input',()=>{byId('port').dataset.touched='1';});
-applyEngine();
+// Every tab just swaps which pane is visible; Trino/PostgreSQL additionally
+// pick which engine's fields payload() reads from at submit time.
+document.querySelectorAll('.tab').forEach(tab=>tab.addEventListener('click',()=>{
+  document.querySelectorAll('.tab').forEach(t=>{t.classList.remove('active');t.setAttribute('aria-selected','false');});
+  document.querySelectorAll('.pane').forEach(p=>p.classList.remove('active'));
+  tab.classList.add('active');
+  tab.setAttribute('aria-selected','true');
+  document.querySelector('.pane[data-pane="'+tab.dataset.pane+'"]').classList.add('active');
+  if(tab.dataset.engine){ engine=tab.dataset.engine; }
+}));
 
-function payload(kind){
-  return {type:kind,engine:byId('engine').value,name:byId('name').value,host:byId('host').value,
-    port:byId('port').value,sslEnabled:byId('sslEnabled').checked,user:byId('user').value,
-    password:byId('password').value,clearPassword:byId('clearPassword').checked,
-    catalog:byId('catalog').value,schema:byId('schema').value,database:byId('database').value,
-    maxRows:byId('maxRows').value,connect};
+function trinoPayload(kind){
+  const port=byId('t-port');
+  return {type:kind,engine:'trino',name:byId('t-name').value,host:byId('t-host').value,
+    port:port.value.trim()||port.placeholder,sslEnabled:byId('t-ssl').checked,user:byId('t-user').value,
+    password:byId('t-password').value,clearPassword:byId('t-clearPassword').checked,
+    catalog:byId('t-catalog').value,schema:byId('t-schema').value,database:'',
+    maxRows:byId('t-maxRows').value,connect};
 }
+function postgresPayload(kind){
+  const port=byId('p-port');
+  return {type:kind,engine:'postgres',name:byId('p-name').value,host:byId('p-host').value,
+    port:port.value.trim()||port.placeholder,sslEnabled:byId('p-ssl').checked,user:byId('p-user').value,
+    password:byId('p-password').value,clearPassword:byId('p-clearPassword').checked,
+    catalog:'',schema:'',database:byId('p-database').value,
+    maxRows:byId('p-maxRows').value,connect};
+}
+function payload(kind){ return engine==='postgres' ? postgresPayload(kind) : trinoPayload(kind); }
 
 document.querySelectorAll('button[type=submit]').forEach(b=>b.addEventListener('click',()=>{connect=b.dataset.connect==='true';}));
 byId('connection').addEventListener('submit',e=>{e.preventDefault();vscode.postMessage(payload('save'));});
@@ -275,7 +219,7 @@ window.addEventListener('message',e=>{
     box.scrollIntoView({block:'nearest'});
   }
 });
-byId('host').focus();`;
+byId(engine==='postgres'?'p-host':'t-host').focus();`;
 
     return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Trino Connection</title><style>${styles}</style></head><body>${body}<script nonce="${nonce}">${script}</script></body></html>`;
 }

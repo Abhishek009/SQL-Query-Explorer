@@ -4,6 +4,15 @@ A VS Code extension for browsing database schemas and running SQL without leavin
 
 Supports **[Trino](https://trino.io)** and **[PostgreSQL](https://www.postgresql.org)**. The explorer, results grid, and editor features are shared by both, so further engines slot in behind the same interface.
 
+### Database support
+
+| Database | Status |
+| --- | --- |
+| [Trino](https://trino.io) | Supported |
+| [PostgreSQL](https://www.postgresql.org) | Supported |
+| [MySQL](https://www.mysql.com) | Not yet supported |
+| [Snowflake](https://www.snowflake.com) | Not yet supported |
+
 ## Features
 
 ### Connections
@@ -53,6 +62,19 @@ Details:
 - **Execution feedback in the editor**: a timing line above the statement (`✓ 619ms · 1,500 row(s)`) plus a green tick or red cross in the gutter.
 - Long-running statements show a cancellable progress indicator and abort the underlying request when cancelled.
 
+#### Per-editor connection and database
+
+Every SQL editor shows its own `$(plug) Connection` and `$(database) Database` lenses above the first line, independent of whichever connection is active elsewhere:
+
+- A new file defaults to the active connection, so it runs without any setup.
+- Click the `$(plug)` lens to point just this editor at a different connection (**SQL: Select Connection for This Query**); click `$(database)` to switch its catalog or database (**SQL: Select Catalog or Database for This Query**) from a live list fetched from that connection.
+- A saved file can instead pin its scope with header comments, which the lenses respect and display:
+  ```sql
+  -- Connection: Production
+  -- Database: analytics
+  ```
+  An explicit pick from the lens overrides a header; a header overrides the active connection.
+
 ### Results
 Results open in an editor tab beside your query. `Run` reuses one tab; `New Tab` opens another so results can be compared. If another editor group is already open — a chat panel, a second file — results become a tab **in that group** rather than splitting the window again. The tab is an ordinary editor, so you can drag it anywhere and VS Code remembers the position; later results follow it there.
 
@@ -85,6 +107,8 @@ Queries without a `LIMIT` could otherwise pull an entire table into memory. The 
 | `SQL: Cancel Running Query` | Stop a running query on the coordinator. |
 | `SQL: Run Statement` | Run one statement into the shared results tab. |
 | `SQL: Run Statement in New Tab` | Run one statement into its own results tab. |
+| `SQL: Select Connection for This Query` | Point the current editor at a different connection, without changing the active one. |
+| `SQL: Select Catalog or Database for This Query` | Switch the catalog (Trino) or database (PostgreSQL) the current editor runs against. |
 
 ### Settings
 

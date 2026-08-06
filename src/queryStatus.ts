@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { formatDuration } from './util';
 import { splitStatements } from './statements';
+import { QueryScope } from './queryScope';
 
 export interface QueryOutcome {
     line: number;
@@ -20,7 +21,7 @@ export class QueryStatusProvider implements vscode.CodeLensProvider, vscode.Disp
     private readonly successGutter: vscode.TextEditorDecorationType;
     private readonly errorGutter: vscode.TextEditorDecorationType;
 
-    public constructor(context: vscode.ExtensionContext) {
+    public constructor(context: vscode.ExtensionContext, private readonly scope: QueryScope) {
         const gutter = (file: string, overviewColor: string) => vscode.window.createTextEditorDecorationType({
             gutterIconPath: vscode.Uri.file(context.asAbsolutePath(`resources/${file}`)),
             gutterIconSize: 'contain',
@@ -39,6 +40,9 @@ export class QueryStatusProvider implements vscode.CodeLensProvider, vscode.Disp
         // redraw; a second notification once that settles keeps the lens immediate.
         setTimeout(() => { this.changed.fire(); this.decorate(); }, 0);
     }
+
+    /** Redraws the lenses, for when the scope changed but no query ran. */
+    public refresh(): void { this.changed.fire(); }
 
     public forget(uri: vscode.Uri): void {
         if (this.outcomes.delete(uri.toString())) { this.changed.fire(); this.decorate(); }
@@ -68,6 +72,32 @@ export class QueryStatusProvider implements vscode.CodeLensProvider, vscode.Disp
     public provideCodeLenses(document: vscode.TextDocument): vscode.CodeLens[] {
         const lenses: vscode.CodeLens[] = [];
         const uri = document.uri.toString();
+
+        // Where the script runs, shown and changeable without editing the file.
+        const top = new vscode.Range(0, 0, 0, 0);
+        const scope = this.scope.resolve(document);
+        lenses.push(new vscode.CodeLens(top, scope.connection
+            ? {
+                title: `$(plug) ${scope.connection.name}`,
+                tooltip: `Statements run against ${scope.connection.name} (${scope.connection.url}). Click to use a different connection.`,
+                command: 'sqlExplorer.selectQueryConnection',
+                arguments: [uri]
+            }
+            : {
+                title: '$(plug) Select connection',
+                tooltip: 'Choose the connection these statements run against',
+                command: 'sqlExplorer.selectQueryConnection',
+                arguments: [uri]
+            }));
+        const database = this.scope.databaseLabel(scope);
+        if (database) {
+            lenses.push(new vscode.CodeLens(top, {
+                title: `$(database) ${database}`,
+                tooltip: 'Change the catalog or database these statements run against',
+                command: 'sqlExplorer.selectQueryDatabase',
+                arguments: [uri]
+            }));
+        }
 
         // Run actions sit above every statement in the script.
         for (const statement of splitStatements(document.getText())) {

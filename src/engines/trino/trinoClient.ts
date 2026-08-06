@@ -1,10 +1,10 @@
 import * as vscode from 'vscode';
-import { StoredConnection, TableEntry, TrinoColumn, TrinoQueryResult, TrinoRequestError } from './types';
-import { passwordKey } from './connectionStore';
-import { describeFetchFailure, firstColumn, numberSetting, quoteIdentifier, quoteLiteral, summarize } from './util';
-import { httpBaseUrl } from './urls';
-import { RunningQueryRegistry } from './runningQueries';
-import { SqlClient } from './client';
+import { StoredConnection, TableEntry, TrinoColumn, TrinoQueryResult, TrinoRequestError } from '../../types';
+import { passwordKey } from '../../connectionStore';
+import { describeFetchFailure, firstColumn, numberSetting, quoteIdentifier, quoteLiteral, summarize } from '../../util';
+import { httpBaseUrl } from './trinoUrls';
+import { RunningQueryRegistry } from '../../runningQueries';
+import { SqlClient } from '../../client';
 
 /**
  * Copies a page into the accumulator, stopping at the cap. Written as a loop
@@ -98,10 +98,27 @@ export class TrinoClient implements SqlClient {
         return result.rows.map(row => String(row[0] ?? '')).join('\n').trim();
     }
 
-    public async query(statement: string, token?: vscode.CancellationToken): Promise<TrinoQueryResult> {
+    public async query(statement: string, token?: vscode.CancellationToken, database?: string): Promise<TrinoQueryResult> {
         const normalizedStatement = statement.trim().replace(/;+$/, '');
         if (!normalizedStatement) { throw new Error('Enter a SQL statement before running it.'); }
-        return this.runStatement(normalizedStatement, token);
+        return this.runStatement(normalizedStatement, token, database);
+    }
+
+    /** Trino reaches every catalog over one session, so names carry all three levels. */
+    public qualify(catalog?: string, schema?: string, table?: string): string {
+        return [catalog, schema, table].filter(Boolean).map(part => quoteIdentifier(part!)).join('.');
+    }
+
+    public starterSql(): string {
+        return 'SELECT *\nFROM system.runtime.nodes\nLIMIT 10;';
+    }
+
+    public previewSql(catalog: string, schema: string, table: string, limit: number): string {
+        return `SELECT * FROM ${this.qualify(catalog, schema, table)} LIMIT ${limit}`;
+    }
+
+    public async previewTable(catalog: string, schema: string, table: string, limit: number, token?: vscode.CancellationToken): Promise<TrinoQueryResult> {
+        return this.query(this.previewSql(catalog, schema, table, limit), token);
     }
 
     /**
@@ -114,8 +131,10 @@ export class TrinoClient implements SqlClient {
         return numberSetting('query.maxRows', 10_000);
     }
 
-    private async runStatement(statement: string, token?: vscode.CancellationToken): Promise<TrinoQueryResult> {
-        const { url: rawUrl, user, catalog, schema } = this.connection;
+    private async runStatement(statement: string, token?: vscode.CancellationToken, database?: string): Promise<TrinoQueryResult> {
+        const { url: rawUrl, user, schema } = this.connection;
+        // The editor's chosen catalog becomes the session default for unqualified names.
+        const catalog = database || this.connection.catalog;
         if (!rawUrl || !user) { throw new Error('Configure the Trino URL and user before connecting.'); }
         const baseUrl = httpBaseUrl(rawUrl);
         if (!baseUrl) {

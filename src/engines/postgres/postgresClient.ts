@@ -1,10 +1,10 @@
 import * as vscode from 'vscode';
 import { Pool, PoolClient } from 'pg';
-import { StoredConnection, TableEntry, TrinoColumn, TrinoQueryResult, TrinoRequestError } from './types';
-import { passwordKey } from './connectionStore';
-import { RunningQueryRegistry } from './runningQueries';
-import { numberSetting, quoteIdentifier } from './util';
-import { SqlClient } from './client';
+import { StoredConnection, TableEntry, TrinoColumn, TrinoQueryResult, TrinoRequestError } from '../../types';
+import { passwordKey } from '../../connectionStore';
+import { RunningQueryRegistry } from '../../runningQueries';
+import { numberSetting, quoteIdentifier } from '../../util';
+import { SqlClient } from '../../client';
 
 /** Statements a cursor can wrap, which is how the row cap is enforced. */
 const CURSOR_SAFE = /^\s*(?:with|select|table|values)\b/i;
@@ -108,10 +108,30 @@ export class PostgresClient implements SqlClient {
         return `CREATE TABLE ${quoteIdentifier(schema)}.${quoteIdentifier(table)} (\n${lines.join(',\n')}\n);`;
     }
 
-    public async query(statement: string, token?: vscode.CancellationToken): Promise<TrinoQueryResult> {
+    public async query(statement: string, token?: vscode.CancellationToken, database?: string): Promise<TrinoQueryResult> {
         const sql = statement.trim().replace(/;+$/, '');
         if (!sql) { throw new Error('Enter a SQL statement before running it.'); }
-        return this.run(sql, this.maxRows(), this.connection.catalog, undefined, token);
+        return this.run(sql, this.maxRows(), database || this.connection.catalog, undefined, token);
+    }
+
+    /**
+     * Postgres cannot reference another database in a statement, so the catalog
+     * level is dropped from the name and carried as the database to connect to.
+     */
+    public qualify(catalog?: string, schema?: string, table?: string): string {
+        return [schema, table].filter(Boolean).map(part => quoteIdentifier(part!)).join('.');
+    }
+
+    public starterSql(): string {
+        return 'SELECT table_schema, table_name\nFROM information_schema.tables\nWHERE table_schema NOT IN (\'pg_catalog\', \'information_schema\')\nORDER BY table_schema, table_name\nLIMIT 10;';
+    }
+
+    public previewSql(catalog: string, schema: string, table: string, limit: number): string {
+        return `SELECT * FROM ${this.qualify(catalog, schema, table)} LIMIT ${limit}`;
+    }
+
+    public async previewTable(catalog: string, schema: string, table: string, limit: number, token?: vscode.CancellationToken): Promise<TrinoQueryResult> {
+        return this.run(this.previewSql(catalog, schema, table, limit), limit, catalog, undefined, token);
     }
 
     /**
@@ -142,6 +162,7 @@ export class PostgresClient implements SqlClient {
                 const direct = await client.query({ text: sql, values, rowMode: 'array' });
                 return this.toResult(direct, limit);
             }
+
             await client.query('BEGIN');
             try {
                 await client.query({ text: `DECLARE _sqlx NO SCROLL CURSOR FOR ${sql}`, values });
@@ -160,11 +181,26 @@ export class PostgresClient implements SqlClient {
         }
     }
 
-    private toResult(result: { fields?: Array<{ name: string }>; rows: unknown[][] }, limit: number): TrinoQueryResult {
+    private toResult(
+        result: { fields?: Array<{ name: string }>; rows?: unknown[][]; command?: string; rowCount?: number | null },
+        limit: number
+    ): TrinoQueryResult {
         const rows = result.rows ?? [];
+        // INSERT/UPDATE/DELETE/DDL return no columns, which would draw an empty
+        // grid and read as "nothing happened". Report what the server did instead.
+        if (!result.fields?.length) {
+            const affected = result.rowCount ?? 0;
+            const command = result.command ?? 'OK';
+            return {
+                columns: ['result'],
+                rows: [[`${command} — ${affected} row${affected === 1 ? '' : 's'} affected`]],
+                truncated: false,
+                maxRows: limit
+            };
+        }
         const truncated = rows.length > limit;
         return {
-            columns: (result.fields ?? []).map(field => field.name),
+            columns: result.fields.map(field => field.name),
             rows: truncated ? rows.slice(0, limit) : rows,
             truncated,
             maxRows: limit

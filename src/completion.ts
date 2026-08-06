@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { ConnectionStore } from './connectionStore';
-import { SqlClient, createClient } from './client';
+import { SqlClient, createClient, engineOf } from './client';
+import { QueryScope } from './queryScope';
 
 /**
  * Completes catalog, schema, table, and column names from the active connection.
@@ -10,7 +11,11 @@ export class SqlCompletionProvider implements vscode.CompletionItemProvider {
     private static readonly CACHE_MS = 5 * 60 * 1_000;
     private readonly cache = new Map<string, { at: number; names: string[] }>();
 
-    public constructor(private readonly store: ConnectionStore, private readonly secrets: vscode.SecretStorage) {}
+    public constructor(
+        private readonly store: ConnectionStore,
+        private readonly secrets: vscode.SecretStorage,
+        private readonly scope: QueryScope
+    ) {}
 
     public clear(): void { this.cache.clear(); }
 
@@ -18,11 +23,20 @@ export class SqlCompletionProvider implements vscode.CompletionItemProvider {
         document: vscode.TextDocument,
         position: vscode.Position
     ): Promise<vscode.CompletionItem[]> {
-        const connection = this.store.get(this.store.activeId);
+        // Completion follows the same scope the statements run under.
+        const { connection, database: scoped } = this.scope.resolve(document);
         if (!connection) { return []; }
         const prefix = document.getText(new vscode.Range(position.line, 0, position.line, position.character));
         const qualifier = qualifierParts(prefix);
         const client = createClient(this.secrets, connection);
+
+        // Postgres names reach only schema.table, and the database comes from the
+        // editor's scope rather than the statement, so it gets its own ladder.
+        if (engineOf(connection) === 'postgres') {
+            const database = scoped ?? connection.catalog;
+            if (!database) { return []; }
+            return this.postgresCompletions(client, connection.id, database, qualifier);
+        }
 
         try {
             if (qualifier.length === 0) {
@@ -66,6 +80,39 @@ export class SqlCompletionProvider implements vscode.CompletionItemProvider {
             });
         } catch {
             // Metadata is best effort; a failed lookup must not break typing.
+            return [];
+        }
+    }
+
+    /** schema → table → column, all inside the one database the editor is scoped to. */
+    private async postgresCompletions(
+        client: SqlClient,
+        connectionId: string,
+        database: string,
+        qualifier: string[]
+    ): Promise<vscode.CompletionItem[]> {
+        try {
+            if (qualifier.length === 0) {
+                const schemas = await this.lookup(`${connectionId}:${database}`, () => client.schemas(database));
+                return schemas.map(name => completionItem(name, vscode.CompletionItemKind.Folder, `schema in ${database}`));
+            }
+            if (qualifier.length === 1) {
+                const [schema] = qualifier;
+                const tables = await this.lookup(`${connectionId}:${database}.${schema}`, () => client.tables(database, schema));
+                return tables.map(name => completionItem(name, vscode.CompletionItemKind.Struct, `table in ${schema}`));
+            }
+            const [schema, table] = qualifier;
+            const columns = await this.lookup(
+                `${connectionId}:${database}.${schema}.${table}:columns`,
+                async () => (await client.columns(database, schema, table)).map(column => `${column.name}\t${column.type}`)
+            );
+            return columns.map(entry => {
+                const separator = entry.indexOf('\t');
+                const name = separator < 0 ? entry : entry.slice(0, separator);
+                const type = separator < 0 ? '' : entry.slice(separator + 1);
+                return completionItem(name, vscode.CompletionItemKind.Field, type || 'column');
+            });
+        } catch {
             return [];
         }
     }

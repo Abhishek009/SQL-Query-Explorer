@@ -4,16 +4,19 @@ import { TrinoExplorerProvider, ExplorerDragController, ExplorerItem } from './e
 import { ResultsTabs } from './resultsView';
 import { QueryStatusProvider } from './queryStatus';
 import { SqlCompletionProvider } from './completion';
-import { openScopedQuery, openSqlQueryEditor, pickConnection, previewTable, resolveConnection, runActiveSql, runStatement, showConnectionWindow, showTableDdl } from './commands';
+import { openScopedQuery, openSqlQueryEditor, pickConnection, previewTable, resolveConnection, runActiveSql, runStatement, selectQueryConnection, selectQueryDatabase, showConnectionWindow, showTableDdl } from './commands';
 import { showConnectionError } from './util';
 import { RunningQueryRegistry, RunningQueryStatus, cancelRunningQuery } from './runningQueries';
+import { QueryScope } from './queryScope';
+import { PostgresClient } from './engines/postgres/postgresClient';
 
 export function activate(context: vscode.ExtensionContext): void {
     const store = new ConnectionStore(context);
-    const provider = new TrinoExplorerProvider(store, context.secrets);
-    const status = new QueryStatusProvider(context);
+    const provider = new TrinoExplorerProvider(store, context.secrets, context.extensionUri);
+    const scope = new QueryScope(store);
+    const status = new QueryStatusProvider(context, scope);
     const tabs = new ResultsTabs();
-    const completions = new SqlCompletionProvider(store, context.secrets);
+    const completions = new SqlCompletionProvider(store, context.secrets, scope);
     const running = new RunningQueryRegistry();
     void store.migrateLegacyConnection();
 
@@ -25,13 +28,14 @@ export function activate(context: vscode.ExtensionContext): void {
         store.onDidChange(() => completions.clear()),
         vscode.window.createTreeView('sqlExplorerConnections', {
             treeDataProvider: provider,
-            dragAndDropController: new ExplorerDragController(),
+            dragAndDropController: new ExplorerDragController(store),
             canSelectMany: true,
             showCollapseAll: true
         }),
         tabs,
         vscode.languages.registerCodeLensProvider({ language: 'sql' }, status),
-        vscode.workspace.onDidCloseTextDocument(document => status.forget(document.uri)),
+        vscode.workspace.onDidCloseTextDocument(document => { status.forget(document.uri); scope.forget(document.uri); }),
+        scope.onDidChange(() => { status.refresh(); completions.clear(); }),
         // Reapply after a split, tab switch, or reopen; decorations are per editor.
         vscode.window.onDidChangeVisibleTextEditors(() => status.decorate()),
         store.onDidChange(() => provider.refresh()),
@@ -59,6 +63,7 @@ export function activate(context: vscode.ExtensionContext): void {
         );
         if (confirmed !== 'Remove') { return; }
         await store.remove(connection.id);
+        await PostgresClient.closeAll(connection.id);
         provider.forget(connection.id);
         vscode.window.showInformationMessage(`Removed connection "${connection.name}".`);
     });
@@ -114,14 +119,16 @@ export function activate(context: vscode.ExtensionContext): void {
     register('sqlExplorer.showTableDdl', async (item?: ExplorerItem) => {
         await showTableDdl(store, context.secrets, tabs, running, item);
     });
-    register('sqlExplorer.openQuery', async () => { await openSqlQueryEditor(store); });
-    register('sqlExplorer.runActiveSql', async () => { await runActiveSql(store, context.secrets, status, tabs, running); });
+    register('sqlExplorer.openQuery', async () => { await openSqlQueryEditor(store, context.secrets); });
+    register('sqlExplorer.runActiveSql', async () => { await runActiveSql(store, context.secrets, status, tabs, running, scope); });
     register('sqlExplorer.runStatement', async (args?: { uri?: string; sql?: string; line?: number }) => {
-        await runStatement(store, context.secrets, status, tabs, running, args);
+        await runStatement(store, context.secrets, status, tabs, running, args, false, scope);
     });
     register('sqlExplorer.runStatementNewTab', async (args?: { uri?: string; sql?: string; line?: number }) => {
-        await runStatement(store, context.secrets, status, tabs, running, args, true);
+        await runStatement(store, context.secrets, status, tabs, running, args, true, scope);
     });
+    register('sqlExplorer.selectQueryConnection', async (uri?: string) => { await selectQueryConnection(store, scope, uri); });
+    register('sqlExplorer.selectQueryDatabase', async (uri?: string) => { await selectQueryDatabase(store, context.secrets, scope, uri); });
     register('sqlExplorer.cancelQuery', async () => { await cancelRunningQuery(running); });
 }
 

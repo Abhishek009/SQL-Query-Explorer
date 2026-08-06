@@ -3,7 +3,7 @@
   "displayName": "SQL Query Explorer",
   "publisher": "big-tech-talk",
   "description": "Browse schemas and run SQL from VS Code. Supports Trino and PostgreSQL.",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -119,6 +119,14 @@
         "command": "sqlExplorer.runStatementNewTab",
         "title": "SQL: Run Statement in New Tab",
         "icon": "$(split-horizontal)"
+      },
+      {
+        "command": "sqlExplorer.selectQueryConnection",
+        "title": "SQL: Select Connection for This Query"
+      },
+      {
+        "command": "sqlExplorer.selectQueryDatabase",
+        "title": "SQL: Select Catalog or Database for This Query"
       }
     ],
     "configuration": {
@@ -127,7 +135,7 @@
         "sqlExplorer.connections": {
           "type": "array",
           "default": [],
-          "description": "Saved connections. Managed by the Connections view \u2014 passwords are kept in Secret Storage, not here.",
+          "description": "Saved connections. Managed by the Connections view — passwords are kept in Secret Storage, not here.",
           "items": {
             "type": "object",
             "required": [
@@ -339,6 +347,14 @@
         {
           "command": "sqlExplorer.runStatementNewTab",
           "when": "false"
+        },
+        {
+          "command": "sqlExplorer.selectQueryConnection",
+          "when": "editorLangId == sql"
+        },
+        {
+          "command": "sqlExplorer.selectQueryDatabase",
+          "when": "editorLangId == sql"
         }
       ],
       "view/title": [

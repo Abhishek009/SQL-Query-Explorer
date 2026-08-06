@@ -6,12 +6,13 @@ import { SqlClient, createClient } from './client';
 import { ExplorerItem, TrinoExplorerProvider, qualifiedName } from './explorer';
 import { ResultsSurface, ResultsTabs } from './resultsView';
 import { QueryStatusProvider } from './queryStatus';
+import { QueryScope } from './queryScope';
 import { RunningQueryRegistry } from './runningQueries';
-import { ConnectionMessage, connectionFormHtml, expandPastedUrl, isConnectionMessage, parseMaxRows, validateConnection } from './connectionForm';
-import { formatHost, parseConnectionUrl } from './urls';
+import { ConnectionMessage, connectionFormHtml, isConnectionMessage, parseMaxRows, validateConnection } from './connectionForm';
 import { engineOf, ENGINE_LABELS } from './client';
-import { PostgresClient, hostAndPort } from './postgresClient';
-import { previewRowLimit, quoteIdentifier, showConnectionError, summarize } from './util';
+import { expandPastedUrl, parseConnectionUrl } from './engines/trino/trinoUrls';
+import { PostgresClient, hostAndPort } from './engines/postgres/postgresClient';
+import { formatHost, previewRowLimit, quoteIdentifier, showConnectionError, summarize } from './util';
 
 export async function pickConnection(store: ConnectionStore, placeHolder: string): Promise<StoredConnection | undefined> {
     const connections = store.all();
@@ -58,11 +59,11 @@ export async function previewTable(store: ConnectionStore, secrets: vscode.Secre
     if (!connection || !item?.catalog || !item.schema || !item.table) { return; }
     const results = tabs.primary(`${item.schema}.${item.table}`);
     if (!force && !isDoubleClick(`${connection.id}/${item.catalog}/${item.schema}/${item.table}`)) { return; }
-    const qualified = `${quoteIdentifier(item.catalog)}.${quoteIdentifier(item.schema)}.${quoteIdentifier(item.table)}`;
     const limit = previewRowLimit();
     const client = createClient(secrets, connection, registry);
+    const { catalog, schema, table } = item;
     const fetchRows = (rowLimit: number, token?: vscode.CancellationToken) =>
-        client.query(`SELECT * FROM ${qualified} LIMIT ${rowLimit}`, token);
+        client.previewTable(catalog, schema, table, rowLimit, token);
     const started = Date.now();
     try {
         const result = await vscode.window.withProgress(
@@ -73,11 +74,11 @@ export async function previewTable(store: ConnectionStore, secrets: vscode.Secre
             results,
             result,
             connection,
-            { sql: `SELECT * FROM ${qualified} LIMIT ${limit}`, milliseconds: Date.now() - started },
+            { sql: client.previewSql(catalog, schema, table, limit), milliseconds: Date.now() - started },
             fetchRows
         );
     } catch (error) {
-        await showQueryError(results, error, connection, `SELECT * FROM ${qualified} LIMIT ${limit}`);
+        await showQueryError(results, error, connection, client.previewSql(catalog, schema, table, limit));
     }
 }
 
@@ -122,31 +123,95 @@ export async function openScopedQuery(store: ConnectionStore, item?: ExplorerIte
     if (!connection || !item) { return; }
     await store.setActive(connection.id);
 
-    const scope = qualifiedName(item);
+    const engine = engineOf(connection);
+    const scope = qualifiedName(item, engine);
     const body = item.kind === 'table'
         ? `SELECT *\nFROM ${scope}\nLIMIT ${previewRowLimit()};\n`
         // Ends on the dot so completion offers the next level straight away.
         : scope ? `SELECT *\nFROM ${scope}.` : '';
     const document = await vscode.workspace.openTextDocument({
         language: 'sql',
-        content: `-- Connection: ${connection.name}\n\n${body}`
+        content: `${scopeHeader(connection, item.catalog)}\n${body}`
     });
     const editor = await vscode.window.showTextDocument(document, { preview: false });
     const end = document.lineAt(document.lineCount - 1).range.end;
     editor.selection = new vscode.Selection(end, end);
 }
 
-export async function openSqlQueryEditor(store: ConnectionStore): Promise<void> {
+export async function openSqlQueryEditor(store: ConnectionStore, secrets: vscode.SecretStorage): Promise<void> {
     const connection = await resolveConnection(store);
     if (!connection) { return; }
+    const starter = createClient(secrets, connection).starterSql();
     const document = await vscode.workspace.openTextDocument({
         language: 'sql',
-        content: `-- Connection: ${connection.name}\nSELECT *\nFROM system.runtime.nodes\nLIMIT 10;`
+        content: `${scopeHeader(connection, connection.catalog)}\n${starter}`
     });
     await vscode.window.showTextDocument(document, { preview: false });
 }
 
-export async function runActiveSql(store: ConnectionStore, secrets: vscode.SecretStorage, status: QueryStatusProvider, tabs: ResultsTabs, registry: RunningQueryRegistry): Promise<void> {
+/**
+ * Records the scope in the file itself. Nothing depends on it — the lens shows
+ * and changes the scope, and an unmarked file runs on the active connection —
+ * but it keeps a saved script readable and portable.
+ */
+function scopeHeader(connection: StoredConnection, catalog: string | undefined): string {
+    const lines = [`-- Connection: ${connection.name}`];
+    if (engineOf(connection) === 'postgres' && catalog) { lines.push(`-- Database: ${catalog}`); }
+    return `${lines.join('\n')}\n`;
+}
+
+/** Lets the user point the current editor at a different connection. */
+export async function selectQueryConnection(store: ConnectionStore, scope: QueryScope, uri?: string): Promise<void> {
+    const document = documentFor(uri);
+    if (!document) { return; }
+    const connection = await pickConnection(store, 'Run this script against…');
+    if (!connection) { return; }
+    scope.setConnection(document, connection.id);
+}
+
+/** Lets the user switch the catalog (Trino) or database (Postgres) for the current editor. */
+export async function selectQueryDatabase(
+    store: ConnectionStore,
+    secrets: vscode.SecretStorage,
+    scope: QueryScope,
+    uri?: string
+): Promise<void> {
+    const document = documentFor(uri);
+    if (!document) { return; }
+    const { connection, database } = scope.resolve(document);
+    if (!connection) {
+        vscode.window.showErrorMessage('Choose a connection before choosing a database.');
+        return;
+    }
+    const label = engineOf(connection) === 'postgres' ? 'database' : 'catalog';
+    try {
+        const names = await vscode.window.withProgress(
+            { location: vscode.ProgressLocation.Window, title: `Loading ${label}s…` },
+            (_, token) => createClient(secrets, connection).catalogs(token)
+        );
+        if (!names.length) {
+            vscode.window.showWarningMessage(`${connection.name} reported no ${label}s.`);
+            return;
+        }
+        const picked = await vscode.window.showQuickPick(
+            names.map(name => ({ label: name, description: name === database ? 'current' : undefined })),
+            { placeHolder: `Select the ${label} to run against` }
+        );
+        if (picked) { scope.setDatabase(document, picked.label); }
+    } catch (error) {
+        showConnectionError(error);
+    }
+}
+
+function documentFor(uri?: string): vscode.TextDocument | undefined {
+    if (uri) {
+        const open = vscode.workspace.textDocuments.find(document => document.uri.toString() === uri);
+        if (open) { return open; }
+    }
+    return vscode.window.activeTextEditor?.document;
+}
+
+export async function runActiveSql(store: ConnectionStore, secrets: vscode.SecretStorage, status: QueryStatusProvider, tabs: ResultsTabs, registry: RunningQueryRegistry, scope: QueryScope): Promise<void> {
     const editor = vscode.window.activeTextEditor;
     if (!editor || editor.document.languageId !== 'sql') {
         vscode.window.showErrorMessage('Open a SQL query editor before running a query.');
@@ -157,7 +222,10 @@ export async function runActiveSql(store: ConnectionStore, secrets: vscode.Secre
     // Anchor the timing above the statement that ran: the selection, or the
     // first non-empty line when the whole editor is executed.
     const line = selectedSql ? editor.selection.start.line : firstStatementLine(editor.document);
-    await executeSql({ store, secrets, status, registry, surface: tabs.primary(tabTitle(sql)), sql, line, uri: editor.document.uri });
+    await executeSql({
+        store, secrets, status, registry, scope, surface: tabs.primary(tabTitle(sql)),
+        sql, line, uri: editor.document.uri, document: editor.document
+    });
 }
 
 export interface ExecuteRequest {
@@ -165,23 +233,30 @@ export interface ExecuteRequest {
     secrets: vscode.SecretStorage;
     status: QueryStatusProvider;
     registry: RunningQueryRegistry;
+    scope: QueryScope;
     /** Where the grid is drawn: the shared panel, or a dedicated tab. */
     surface: ResultsSurface;
     sql: string;
     line: number;
     uri: vscode.Uri;
+    /** The editor the statement came from, which carries the connection and database. */
+    document?: vscode.TextDocument;
 }
 
 /** One execution path for every entry point, so timing and errors stay uniform. */
 export async function executeSql(request: ExecuteRequest): Promise<void> {
-    const { store, secrets, status, registry, surface, sql, line, uri } = request;
-    const connection = await resolveConnection(store);
+    const { store, secrets, status, registry, scope, surface, sql, line, uri, document } = request;
+    // The editor's own scope wins; falling back to the active connection means a
+    // plain .sql file with no header still runs.
+    const resolved = document ? scope.resolve(document) : {};
+    const connection = resolved.connection ?? await resolveConnection(store);
     if (!connection) { return; }
+    const database = resolved.connection ? resolved.database : connection.catalog;
     const started = Date.now();
     try {
         const result = await vscode.window.withProgress(
             { location: vscode.ProgressLocation.Notification, title: `Running query on ${connection.name}…`, cancellable: true },
-            (_, token) => createClient(secrets, connection, registry).query(sql, token)
+            (_, token) => createClient(secrets, connection, registry).query(sql, token, database)
         );
         const elapsed = Date.now() - started;
         status.record(uri, { line, milliseconds: elapsed, rows: result.rows.length });
@@ -213,14 +288,17 @@ export async function runStatement(
     tabs: ResultsTabs,
     registry: RunningQueryRegistry,
     args?: { uri?: string; sql?: string; line?: number },
-    newTab = false
+    newTab = false,
+    scope?: QueryScope
 ): Promise<void> {
-    if (!args?.sql || !args.uri) { return; }
+    if (!args?.sql || !args.uri || !scope) { return; }
     const title = tabTitle(args.sql);
     const surface = newTab ? tabs.additional(title) : tabs.primary(title);
+    // The lens carries only the one statement, so the scope lives on the document.
+    const document = vscode.workspace.textDocuments.find(open => open.uri.toString() === args.uri);
     await executeSql({
-        store, secrets, status, registry, surface,
-        sql: args.sql, line: args.line ?? 0, uri: vscode.Uri.parse(args.uri)
+        store, secrets, status, registry, scope, surface,
+        sql: args.sql, line: args.line ?? 0, uri: vscode.Uri.parse(args.uri), document
     });
 }
 
@@ -316,21 +394,26 @@ export async function showConnectionWindow(
     existing: StoredConnection | undefined
 ): Promise<void> {
     const engine = engineOf(existing ?? { type: 'trino' } as StoredConnection);
-    const current = engine === 'postgres'
-        ? { ...hostAndPort(existing?.url ?? 'postgresql://localhost:5432'), sslEnabled: Boolean(existing?.ssl) }
-        : parseConnectionUrl(existing?.url ?? 'http://localhost:8080');
+    // A new connection starts blank so the placeholder hints show and clear on
+    // focus, rather than pre-filling fields the user would have to type over.
+    const current = existing
+        ? engine === 'postgres'
+            ? { ...hostAndPort(existing.url), sslEnabled: Boolean(existing.ssl) }
+            : parseConnectionUrl(existing.url)
+        : { host: '', port: '', sslEnabled: false };
     const panel = vscode.window.createWebviewPanel(
         'trinoConnection',
         existing ? `Edit ${existing.name}` : 'New Trino Connection',
         vscode.ViewColumn.One,
-        { enableScripts: true }
+        // Keeps typed-but-unsaved fields intact when the user switches tabs and back.
+        { enableScripts: true, retainContextWhenHidden: true }
     );
     const hasPassword = existing ? Boolean(await context.secrets.get(passwordKey(existing.id))) : false;
     panel.webview.html = connectionFormHtml(panel.webview, {
-        name: existing?.name ?? 'New Connection',
+        name: existing?.name ?? '',
         engine,
         host: current.host,
-        port: String(current.port),
+        port: current.port ? String(current.port) : '',
         sslEnabled: current.sslEnabled,
         user: existing?.user ?? '',
         catalog: engine === 'postgres' ? '' : (existing?.catalog ?? ''),
@@ -360,6 +443,8 @@ export async function showConnectionWindow(
         if (request.clearPassword) { await context.secrets.delete(passwordKey(id)); }
         else if (request.password) { await context.secrets.store(passwordKey(id), request.password); }
 
+        // Editing host/port must not leave a pool connected to the old server.
+        await PostgresClient.closeAll(id);
         provider.forget(id);
         panel.dispose();
         vscode.window.showInformationMessage(`Trino connection saved: ${url}`);

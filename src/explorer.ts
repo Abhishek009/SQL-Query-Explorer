@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { StoredConnection, TableEntry, TrinoColumn } from './types';
 import { ConnectionStore } from './connectionStore';
-import { SqlClient, createClient } from './client';
+import { EngineId, SqlClient, createClient, engineOf } from './client';
 import { quoteIdentifier, showConnectionError } from './util';
 
 export type ExplorerNodeKind = 'connection' | 'catalog' | 'schema' | 'group' | 'table' | 'column' | 'empty';
@@ -13,7 +13,11 @@ export class TrinoExplorerProvider implements vscode.TreeDataProvider<ExplorerIt
     /** Table and view listings per "connectionId/catalog/schema". */
     private readonly entriesBySchema = new Map<string, TableEntry[]>();
 
-    public constructor(private readonly store: ConnectionStore, private readonly secrets: vscode.SecretStorage) {}
+    public constructor(
+        private readonly store: ConnectionStore,
+        private readonly secrets: vscode.SecretStorage,
+        private readonly extensionUri: vscode.Uri
+    ) {}
 
     public getTreeItem(item: ExplorerItem): vscode.TreeItem { return item; }
 
@@ -24,7 +28,8 @@ export class TrinoExplorerProvider implements vscode.TreeDataProvider<ExplorerIt
             return connections.map(connection => ExplorerItem.connection(
                 connection,
                 this.catalogsByConnection.has(connection.id),
-                this.store.activeId === connection.id
+                this.store.activeId === connection.id,
+                this.extensionUri
             ));
         }
 
@@ -136,25 +141,35 @@ export class ExplorerDragController implements vscode.TreeDragAndDropController<
     public readonly dragMimeTypes = ['text/plain'];
     public readonly dropMimeTypes: string[] = [];
 
+    public constructor(private readonly store: ConnectionStore) {}
+
     public handleDrag(source: readonly ExplorerItem[], data: vscode.DataTransfer): void {
-        const text = source.map(qualifiedName).filter(Boolean).join(', ');
+        const text = source
+            .map(item => qualifiedName(item, engineOf(this.store.get(item.connectionId) ?? {} as StoredConnection)))
+            .filter(Boolean).join(', ');
         if (text) { data.set('text/plain', new vscode.DataTransferItem(text)); }
     }
 
     public handleDrop(): void { /* the tree accepts no drops */ }
 }
 
-/** The SQL name a node stands for, quoting only identifiers that need it. */
-export function qualifiedName(item: ExplorerItem): string {
+/**
+ * The SQL name a node stands for, quoting only identifiers that need it. The
+ * catalog level is dropped for Postgres, where a database cannot be named in a
+ * statement — the connection has to be opened against it instead.
+ */
+export function qualifiedName(item: ExplorerItem, engine: EngineId = 'trino'): string {
     const part = (name: string) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? name : quoteIdentifier(name);
+    const catalog = engine === 'postgres' ? undefined : item.catalog;
     switch (item.kind) {
         case 'catalog':
-            return item.catalog ? part(item.catalog) : '';
+            // For Postgres this is a database: nothing to write into the SQL.
+            return catalog ? part(catalog) : '';
         case 'schema':
-            return item.catalog && item.schema ? `${part(item.catalog)}.${part(item.schema)}` : '';
+            return item.schema ? [catalog, item.schema].filter(Boolean).map(name => part(name!)).join('.') : '';
         case 'table':
-            return item.catalog && item.schema && item.table
-                ? `${part(item.catalog)}.${part(item.schema)}.${part(item.table)}`
+            return item.schema && item.table
+                ? [catalog, item.schema, item.table].filter(Boolean).map(name => part(name!)).join('.')
                 : '';
         case 'column':
             // A bare column name is what you want inside a SELECT list.
@@ -189,11 +204,19 @@ export class ExplorerItem extends vscode.TreeItem {
         return item;
     }
 
-    public static connection(connection: StoredConnection, connected: boolean, active: boolean): ExplorerItem {
+    public static connection(connection: StoredConnection, connected: boolean, active: boolean, extensionUri: vscode.Uri): ExplorerItem {
         const item = new ExplorerItem(connection.name, 'connection', connection.id);
         const endpoint = connection.url.replace(/^https?:\/\//, '');
         item.description = connected ? `${endpoint} • Connected` : endpoint;
-        item.iconPath = new vscode.ThemeIcon(connected ? 'vm-active' : 'vm', active ? new vscode.ThemeColor('charts.green') : undefined);
+        // A themed icon color gets washed out by the selection highlight, so the
+        // active mark is a literal SVG (the connection glyph plus a green check
+        // badge) instead of a tinted ThemeIcon — always visible, selected or not.
+        item.iconPath = active
+            ? {
+                light: vscode.Uri.joinPath(extensionUri, 'resources', 'connection-active-light.svg'),
+                dark: vscode.Uri.joinPath(extensionUri, 'resources', 'connection-active-dark.svg')
+            }
+            : new vscode.ThemeIcon(connected ? 'vm-active' : 'vm');
         item.tooltip = new vscode.MarkdownString(
             `**${connection.name}**\n\n${connection.url}\n\nUser: \`${connection.user}\`${active ? '\n\nActive connection for SQL queries.' : ''}`
         );

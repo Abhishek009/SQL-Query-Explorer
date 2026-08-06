@@ -17,6 +17,15 @@ export function summarize(body: string): string {
     return collapsed.length > 300 ? `${collapsed.slice(0, 300)}…` : collapsed;
 }
 
+/** Brackets a host so it survives concatenation into a `host:port` URL, e.g. an IPv6 literal. */
+export function formatHost(host: string): string {
+    return host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
+}
+
+export function escapeHtml(value: string): string {
+    return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+}
+
 export function quoteIdentifier(identifier: string): string {
     return `"${identifier.replace(/"/g, '""')}"`;
 }
