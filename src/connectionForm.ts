@@ -1,10 +1,11 @@
 import * as vscode from 'vscode';
 import { trinoFieldsHtml } from './engines/trino/trinoConnectionFields';
 import { postgresFieldsHtml } from './engines/postgres/postgresConnectionFields';
+import { supabaseFieldsHtml } from './engines/supabase/supabaseConnectionFields';
 
 export interface ConnectionFormData {
     name: string;
-    engine: 'trino' | 'postgres';
+    engine: 'trino' | 'postgres' | 'supabase';
     host: string;
     port: string;
     sslEnabled: boolean;
@@ -54,6 +55,7 @@ export function connectionFormHtml(webview: vscode.Webview, values: ConnectionFo
     // blank rather than showing data that belongs to a different connection.
     const trinoValues = values.engine === 'trino' ? values : { ...BLANK, engine: 'trino' as const };
     const postgresValues = values.engine === 'postgres' ? values : { ...BLANK, engine: 'postgres' as const };
+    const supabaseValues = values.engine === 'supabase' ? values : { ...BLANK, engine: 'supabase' as const };
 
     const styles = `
 :root{--gap:12px;--radius:6px}
@@ -111,17 +113,20 @@ code{background:var(--vscode-textCodeBlock-background,rgba(128,128,128,.16));pad
 .tab:hover{color:var(--vscode-foreground);background:var(--vscode-toolbar-hoverBackground,rgba(128,128,128,.12))}
 .tab.active{color:var(--vscode-foreground);border-bottom-color:var(--vscode-focusBorder,#2f7ce0)}
 .tab-icon{flex:0 0 auto;width:15px;height:15px;border-radius:4px;display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;color:#fff;line-height:1}
-.tab-sep{width:1px;align-self:stretch;background:var(--vscode-panel-border,rgba(128,128,128,.35));margin:2px 4px}
 .pane{display:none}
 .pane.active{display:block}
-.soon{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:44px 20px;color:var(--vscode-descriptionForeground);text-align:center}
-.soon strong{color:var(--vscode-foreground);font-size:1.02em}
 button{padding:7px 18px;border:0;border-radius:4px;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;color:var(--vscode-button-foreground);background:var(--vscode-button-background)}
 button:hover{background:var(--vscode-button-hoverBackground)}
 button.secondary{color:var(--vscode-button-secondaryForeground,var(--vscode-foreground));background:var(--vscode-button-secondaryBackground,transparent);border:1px solid var(--vscode-panel-border,rgba(128,128,128,.45))}
 button.secondary:hover{background:var(--vscode-button-secondaryHoverBackground,rgba(128,128,128,.16))}
 button:focus-visible{outline:2px solid var(--vscode-focusBorder,#2f7ce0);outline-offset:2px}
 @media(max-width:520px){.row,.row-eq{grid-template-columns:1fr}}`;
+
+    const isPostgres = values.engine === 'postgres';
+    const isSupabase = values.engine === 'supabase';
+    const isTrino = !isPostgres && !isSupabase;
+    const tab = (active: boolean) => active ? ' active' : '';
+    const selected = (active: boolean) => active ? 'true' : 'false';
 
     const body = `
 <div class="page">
@@ -134,26 +139,16 @@ button:focus-visible{outline:2px solid var(--vscode-focusBorder,#2f7ce0);outline
   <div id="error" class="alert" role="alert"></div>
   <p class="tabs-label">Server Type</p>
   <div class="tabs" role="tablist">
-    <button type="button" class="tab${values.engine === 'postgres' ? '' : ' active'}" data-pane="trino" data-engine="trino" role="tab" aria-selected="${values.engine === 'postgres' ? 'false' : 'true'}"><span class="tab-icon" style="background:#dd4b39">T</span>Trino</button>
-    <button type="button" class="tab${values.engine === 'postgres' ? ' active' : ''}" data-pane="postgres" data-engine="postgres" role="tab" aria-selected="${values.engine === 'postgres' ? 'true' : 'false'}"><span class="tab-icon" style="background:#336791">P</span>PostgreSQL</button>
-    <span class="tab-sep"></span>
-    <button type="button" class="tab" data-pane="ssh" role="tab" aria-selected="false"><span class="tab-icon" style="background:#6e7681">⇄</span>SSH Tunnel</button>
-    <button type="button" class="tab" data-pane="socks" role="tab" aria-selected="false"><span class="tab-icon" style="background:#c9822a">S</span>Socks Proxy</button>
-    <button type="button" class="tab" data-pane="http" role="tab" aria-selected="false"><span class="tab-icon" style="background:#3f9142">H</span>HTTP Proxy</button>
+    <button type="button" class="tab${tab(isTrino)}" data-pane="trino" data-engine="trino" role="tab" aria-selected="${selected(isTrino)}"><span class="tab-icon" style="background:#dd4b39">T</span>Trino</button>
+    <button type="button" class="tab${tab(isPostgres)}" data-pane="postgres" data-engine="postgres" role="tab" aria-selected="${selected(isPostgres)}"><span class="tab-icon" style="background:#336791">P</span>PostgreSQL</button>
+    <button type="button" class="tab${tab(isSupabase)}" data-pane="supabase" data-engine="supabase" role="tab" aria-selected="${selected(isSupabase)}"><span class="tab-icon" style="background:#3ecf8e">⚡</span>Supabase</button>
   </div>
   <form id="connection">
-   <div class="pane${values.engine === 'postgres' ? '' : ' active'}" data-pane="trino">${trinoFieldsHtml(trinoValues, passwordHint, hasPassword)}
+   <div class="pane${tab(isTrino)}" data-pane="trino">${trinoFieldsHtml(trinoValues, passwordHint, hasPassword)}
    </div>
-   <div class="pane${values.engine === 'postgres' ? ' active' : ''}" data-pane="postgres">${postgresFieldsHtml(postgresValues, passwordHint, hasPassword)}
+   <div class="pane${tab(isPostgres)}" data-pane="postgres">${postgresFieldsHtml(postgresValues, passwordHint, hasPassword)}
    </div>
-   <div class="pane" data-pane="ssh">
-    <div class="soon"><strong>SSH Tunnel</strong><span>Route this connection through an SSH bastion. Not available yet.</span></div>
-   </div>
-   <div class="pane" data-pane="socks">
-    <div class="soon"><strong>Socks Proxy</strong><span>Connect through a SOCKS proxy. Not available yet.</span></div>
-   </div>
-   <div class="pane" data-pane="http">
-    <div class="soon"><strong>HTTP Proxy</strong><span>Connect through an HTTP proxy. Not available yet.</span></div>
+   <div class="pane${tab(isSupabase)}" data-pane="supabase">${supabaseFieldsHtml(supabaseValues, passwordHint, hasPassword)}
    </div>
    <div id="result" class="result" role="status"></div>
   </form>
@@ -169,7 +164,7 @@ button:focus-visible{outline:2px solid var(--vscode-focusBorder,#2f7ce0);outline
     const script = `const vscode=acquireVsCodeApi();
 const byId=id=>document.getElementById(id);
 let connect=true;
-let engine='${values.engine === 'postgres' ? 'postgres' : 'trino'}';
+let engine='${values.engine === 'postgres' ? 'postgres' : values.engine === 'supabase' ? 'supabase' : 'trino'}';
 
 // Every tab just swaps which pane is visible; Trino/PostgreSQL additionally
 // pick which engine's fields payload() reads from at submit time.
@@ -198,7 +193,15 @@ function postgresPayload(kind){
     catalog:'',schema:'',database:byId('p-database').value,
     maxRows:byId('p-maxRows').value,connect};
 }
-function payload(kind){ return engine==='postgres' ? postgresPayload(kind) : trinoPayload(kind); }
+function supabasePayload(kind){
+  const port=byId('s-port'), user=byId('s-user');
+  return {type:kind,engine:'supabase',name:byId('s-name').value,host:byId('s-host').value,
+    port:port.value.trim()||port.placeholder,sslEnabled:byId('s-ssl').checked,user:user.value.trim()||user.placeholder,
+    password:byId('s-password').value,clearPassword:byId('s-clearPassword').checked,
+    catalog:'',schema:'',database:byId('s-database').value,
+    maxRows:byId('s-maxRows').value,connect};
+}
+function payload(kind){ return engine==='postgres' ? postgresPayload(kind) : engine==='supabase' ? supabasePayload(kind) : trinoPayload(kind); }
 
 document.querySelectorAll('button[type=submit]').forEach(b=>b.addEventListener('click',()=>{connect=b.dataset.connect==='true';}));
 byId('connection').addEventListener('submit',e=>{e.preventDefault();vscode.postMessage(payload('save'));});
@@ -219,7 +222,7 @@ window.addEventListener('message',e=>{
     box.scrollIntoView({block:'nearest'});
   }
 });
-byId(engine==='postgres'?'p-host':'t-host').focus();`;
+byId(engine==='postgres'?'p-host':engine==='supabase'?'s-host':'t-host').focus();`;
 
     return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Trino Connection</title><style>${styles}</style></head><body>${body}<script nonce="${nonce}">${script}</script></body></html>`;
 }

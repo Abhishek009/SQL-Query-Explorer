@@ -2,8 +2,8 @@
   "name": "trino-explorer",
   "displayName": "SQL Query Explorer",
   "publisher": "big-tech-talk",
-  "description": "Browse schemas and run SQL from VS Code. Supports Trino and PostgreSQL.",
-  "version": "1.0.8",
+  "description": "Browse schemas and run SQL from VS Code. Supports Trino, PostgreSQL, and Supabase.",
+  "version": "2.0.0",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -29,7 +29,8 @@
     "trino",
     "presto",
     "postgres",
-    "postgresql"
+    "postgresql",
+    "supabase"
   ],
   "activationEvents": [
     "onLanguage:sql"
@@ -178,13 +179,14 @@
                 "type": "string",
                 "enum": [
                   "trino",
-                  "postgres"
+                  "postgres",
+                  "supabase"
                 ],
                 "description": "Engine this connection speaks. Absent means Trino."
               },
               "ssl": {
                 "type": "boolean",
-                "description": "PostgreSQL only: use TLS to reach the server."
+                "description": "PostgreSQL/Supabase only: use TLS to reach the server."
               }
             }
           }
@@ -464,15 +466,19 @@
     "vscode:prepublish": "npm run bundle -- --production",
     "bundle": "node esbuild.mjs",
     "compile": "tsc -p ./",
-    "watch": "node esbuild.mjs --watch"
+    "watch": "node esbuild.mjs --watch",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
     "@types/pg": "^8.20.4",
     "@types/vscode": "^1.85.0",
     "@vscode/vsce": "^3.9.2",
+    "dotenv": "^17.4.2",
     "esbuild": "^0.28.1",
-    "typescript": "^5.3.0"
+    "typescript": "^5.3.0",
+    "vitest": "^4.1.10"
   },
   "dependencies": {
     "pg": "^8.22.0"

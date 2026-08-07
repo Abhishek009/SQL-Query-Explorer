@@ -9,9 +9,10 @@ import { QueryStatusProvider } from './queryStatus';
 import { QueryScope } from './queryScope';
 import { RunningQueryRegistry } from './runningQueries';
 import { ConnectionMessage, connectionFormHtml, isConnectionMessage, parseMaxRows, validateConnection } from './connectionForm';
-import { engineOf, ENGINE_LABELS } from './client';
+import { addressesByDatabase, engineOf, ENGINE_LABELS } from './client';
 import { expandPastedUrl, parseConnectionUrl } from './engines/trino/trinoUrls';
 import { PostgresClient, hostAndPort } from './engines/postgres/postgresClient';
+import { expandPastedSupabaseUrl } from './engines/supabase/supabaseUrls';
 import { formatHost, previewRowLimit, quoteIdentifier, showConnectionError, summarize } from './util';
 
 export async function pickConnection(store: ConnectionStore, placeHolder: string): Promise<StoredConnection | undefined> {
@@ -156,7 +157,7 @@ export async function openSqlQueryEditor(store: ConnectionStore, secrets: vscode
  */
 function scopeHeader(connection: StoredConnection, catalog: string | undefined): string {
     const lines = [`-- Connection: ${connection.name}`];
-    if (engineOf(connection) === 'postgres' && catalog) { lines.push(`-- Database: ${catalog}`); }
+    if (addressesByDatabase(engineOf(connection)) && catalog) { lines.push(`-- Database: ${catalog}`); }
     return `${lines.join('\n')}\n`;
 }
 
@@ -183,7 +184,7 @@ export async function selectQueryDatabase(
         vscode.window.showErrorMessage('Choose a connection before choosing a database.');
         return;
     }
-    const label = engineOf(connection) === 'postgres' ? 'database' : 'catalog';
+    const label = addressesByDatabase(engineOf(connection)) ? 'database' : 'catalog';
     try {
         const names = await vscode.window.withProgress(
             { location: vscode.ProgressLocation.Window, title: `Loading ${label}s…` },
@@ -343,17 +344,18 @@ export async function showSqlResults(
 export function connectionFromForm(request: ConnectionMessage, id: string): StoredConnection {
     const host = formatHost(request.host.trim());
     const port = request.port.trim();
-    const postgres = request.engine === 'postgres';
+    const wireProtocol = addressesByDatabase(request.engine);
+    const defaultName = { trino: 'Trino Connection', postgres: 'PostgreSQL Connection', supabase: 'Supabase Connection' }[request.engine];
     return {
         id,
-        name: request.name.trim() || (postgres ? 'PostgreSQL Connection' : 'Trino Connection'),
+        name: request.name.trim() || defaultName,
         type: request.engine,
-        // Postgres keeps its database in `catalog`, which is also the tree's top level.
-        url: postgres ? `postgresql://${host}:${port}` : `${request.sslEnabled ? 'https' : 'http'}://${host}:${port}`,
+        // Postgres/Supabase keep their database in `catalog`, which is also the tree's top level.
+        url: wireProtocol ? `postgresql://${host}:${port}` : `${request.sslEnabled ? 'https' : 'http'}://${host}:${port}`,
         user: request.user.trim(),
-        catalog: postgres ? (request.database.trim() || 'postgres') : (request.catalog.trim() || undefined),
-        schema: postgres ? undefined : (request.schema.trim() || undefined),
-        ssl: postgres ? request.sslEnabled : undefined,
+        catalog: wireProtocol ? (request.database.trim() || 'postgres') : (request.catalog.trim() || undefined),
+        schema: wireProtocol ? undefined : (request.schema.trim() || undefined),
+        ssl: wireProtocol ? request.sslEnabled : undefined,
         maxRows: parseMaxRows(request.maxRows)
     };
 }
@@ -394,16 +396,17 @@ export async function showConnectionWindow(
     existing: StoredConnection | undefined
 ): Promise<void> {
     const engine = engineOf(existing ?? { type: 'trino' } as StoredConnection);
+    const wireProtocol = addressesByDatabase(engine);
     // A new connection starts blank so the placeholder hints show and clear on
     // focus, rather than pre-filling fields the user would have to type over.
     const current = existing
-        ? engine === 'postgres'
+        ? wireProtocol
             ? { ...hostAndPort(existing.url), sslEnabled: Boolean(existing.ssl) }
             : parseConnectionUrl(existing.url)
         : { host: '', port: '', sslEnabled: false };
     const panel = vscode.window.createWebviewPanel(
         'trinoConnection',
-        existing ? `Edit ${existing.name}` : 'New Trino Connection',
+        existing ? `Edit ${existing.name}` : 'New Connection',
         vscode.ViewColumn.One,
         // Keeps typed-but-unsaved fields intact when the user switches tabs and back.
         { enableScripts: true, retainContextWhenHidden: true }
@@ -416,15 +419,15 @@ export async function showConnectionWindow(
         port: current.port ? String(current.port) : '',
         sslEnabled: current.sslEnabled,
         user: existing?.user ?? '',
-        catalog: engine === 'postgres' ? '' : (existing?.catalog ?? ''),
+        catalog: wireProtocol ? '' : (existing?.catalog ?? ''),
         schema: existing?.schema ?? '',
-        database: engine === 'postgres' ? (existing?.catalog ?? '') : '',
+        database: wireProtocol ? (existing?.catalog ?? '') : '',
         maxRows: existing?.maxRows ? String(existing.maxRows) : ''
     }, Boolean(existing), hasPassword);
 
     panel.webview.onDidReceiveMessage(async (message: unknown) => {
         if (!isConnectionMessage(message)) { return; }
-        const request = expandPastedUrl(message);
+        const request = message.engine === 'supabase' ? expandPastedSupabaseUrl(message) : expandPastedUrl(message);
         const validation = validateConnection(request);
         if (validation) {
             void panel.webview.postMessage({ type: 'error', message: validation });

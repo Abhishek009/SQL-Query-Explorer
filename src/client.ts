@@ -40,17 +40,24 @@ export interface SqlClient {
     testConnection(token?: vscode.CancellationToken): Promise<string>;
 }
 
-export type EngineId = 'trino' | 'postgres';
+export type EngineId = 'trino' | 'postgres' | 'supabase';
 
 /** Connections without a type predate Postgres support, so they are Trino. */
 export function engineOf(connection: StoredConnection): EngineId {
-    return connection.type === 'postgres' ? 'postgres' : 'trino';
+    return connection.type === 'postgres' || connection.type === 'supabase' ? connection.type : 'trino';
 }
 
 export const ENGINE_LABELS: Record<EngineId, string> = {
     trino: 'Trino',
-    postgres: 'PostgreSQL'
+    postgres: 'PostgreSQL',
+    supabase: 'Supabase'
 };
+
+/** Supabase is hosted Postgres over the same wire protocol, so it addresses by
+ *  database rather than catalog just like Postgres — everything but Trino does. */
+export function addressesByDatabase(engine: EngineId): boolean {
+    return engine !== 'trino';
+}
 
 export function createClient(
     secrets: vscode.SecretStorage,
@@ -59,7 +66,7 @@ export function createClient(
     /** Used when testing details that have not been saved to Secret Storage yet. */
     password?: string
 ): SqlClient {
-    return engineOf(connection) === 'postgres'
+    return addressesByDatabase(engineOf(connection))
         ? new PostgresClient(secrets, connection, registry, password)
         : new TrinoClient(secrets, connection, registry, password);
 }

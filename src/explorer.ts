@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { StoredConnection, TableEntry, TrinoColumn } from './types';
 import { ConnectionStore } from './connectionStore';
-import { EngineId, SqlClient, createClient, engineOf } from './client';
+import { EngineId, SqlClient, addressesByDatabase, createClient, engineOf } from './client';
 import { quoteIdentifier, showConnectionError } from './util';
 
 export type ExplorerNodeKind = 'connection' | 'catalog' | 'schema' | 'group' | 'table' | 'column' | 'empty';
@@ -160,7 +160,7 @@ export class ExplorerDragController implements vscode.TreeDragAndDropController<
  */
 export function qualifiedName(item: ExplorerItem, engine: EngineId = 'trino'): string {
     const part = (name: string) => /^[A-Za-z_][A-Za-z0-9_]*$/.test(name) ? name : quoteIdentifier(name);
-    const catalog = engine === 'postgres' ? undefined : item.catalog;
+    const catalog = addressesByDatabase(engine) ? undefined : item.catalog;
     switch (item.kind) {
         case 'catalog':
             // For Postgres this is a database: nothing to write into the SQL.

@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { ConnectionStore } from './connectionStore';
-import { SqlClient, createClient, engineOf } from './client';
+import { SqlClient, addressesByDatabase, createClient, engineOf } from './client';
 import { QueryScope } from './queryScope';
 
 /**
@@ -30,9 +30,9 @@ export class SqlCompletionProvider implements vscode.CompletionItemProvider {
         const qualifier = qualifierParts(prefix);
         const client = createClient(this.secrets, connection);
 
-        // Postgres names reach only schema.table, and the database comes from the
-        // editor's scope rather than the statement, so it gets its own ladder.
-        if (engineOf(connection) === 'postgres') {
+        // Postgres/Supabase names reach only schema.table, and the database comes
+        // from the editor's scope rather than the statement, so it gets its own ladder.
+        if (addressesByDatabase(engineOf(connection))) {
             const database = scoped ?? connection.catalog;
             if (!database) { return []; }
             return this.postgresCompletions(client, connection.id, database, qualifier);

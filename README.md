@@ -2,7 +2,7 @@
 
 A VS Code extension for browsing database schemas and running SQL without leaving the editor.
 
-Supports **[Trino](https://trino.io)** and **[PostgreSQL](https://www.postgresql.org)**. The explorer, results grid, and editor features are shared by both, so further engines slot in behind the same interface.
+Supports **[Trino](https://trino.io)**, **[PostgreSQL](https://www.postgresql.org)**, and **[Supabase](https://supabase.com)**. The explorer, results grid, and editor features are shared by all of them, so further engines slot in behind the same interface.
 
 ### Database support
 
@@ -10,20 +10,22 @@ Supports **[Trino](https://trino.io)** and **[PostgreSQL](https://www.postgresql
 | --- | --- |
 | [Trino](https://trino.io) | Supported |
 | [PostgreSQL](https://www.postgresql.org) | Supported |
+| [Supabase](https://supabase.com) | Supported |
 | [MySQL](https://www.mysql.com) | Not yet supported |
 | [Snowflake](https://www.snowflake.com) | Not yet supported |
 
 ## Features
 
 ### Connections
-- **Pick the engine when adding a connection** — Trino or PostgreSQL — and the form shows only the fields that engine needs.
+- **Pick the engine when adding a connection** — Trino, PostgreSQL, or Supabase — and the form shows only the fields that engine needs.
 - **Test Connection** runs a real query against the details you typed, before saving anything.
 - **Manage several servers at once** — dev, staging, and production sit side by side in the **Connections** view. Add one with the **+** button, then edit, remove, or refresh each from its context menu.
 - One connection is **active** for queries at a time; right-click → **Use Connection for Queries** to switch.
 - **Paste a JDBC connection string or a full URL into the Host field** and the rest of the form fills itself in — see [Connection URL formats](#connection-url-formats).
+- **Supabase** gets its own tab in **Connect To DB**. Paste the project's **Connection string** (from Project Settings → Database) or just its project ref into the Host field and the host, port, user, and database fill themselves in — see [Supabase connections](#supabase-connections).
 - Passwords are stored in **VS Code Secret Storage**, never in `settings.json`.
-- Trino traffic goes through the `/v1/statement` REST endpoint; PostgreSQL uses the native wire protocol.
-- For PostgreSQL the tree's top level lists **databases** on the server, so siblings of the one you opened are browsable too.
+- Trino traffic goes through the `/v1/statement` REST endpoint; PostgreSQL and Supabase use the native Postgres wire protocol.
+- For PostgreSQL and Supabase the tree's top level lists **databases** on the server, so siblings of the one you opened are browsable too.
 
 #### Connection URL formats
 
@@ -45,6 +47,22 @@ Details:
 - `jdbc:presto://` is accepted for older deployments.
 - A password in the URL is **ignored by design**, so it never lands in `settings.json` in clear text — enter it in the form instead, where it goes to Secret Storage.
 - JDBC-only parameters such as `SSLVerification`, `KerberosRemoteServiceName`, and `extraCredentials` are parsed but not yet applied.
+
+#### Supabase connections
+
+Supabase is hosted PostgreSQL, so it talks the same wire protocol and shares PostgreSQL's client under the hood — it just gets defaults and a paste target suited to a Supabase project. The Host field on the **Supabase** tab accepts:
+
+| You enter | Resolves to |
+| --- | --- |
+| `abcdefghijklmnop` (a bare project ref) | Host `db.abcdefghijklmnop.supabase.co` |
+| `db.abcdefghijklmnop.supabase.co` | Used as-is |
+| `postgresql://postgres:yourpassword@db.abcdefghijklmnop.supabase.co:5432/postgres` | Host, port, user, database, and password all filled in |
+
+Details:
+- The full **Connection string** from Project Settings → Database — including the placeholder `[YOUR-PASSWORD]` some copies contain — pastes cleanly; a real password in the string is picked up, a placeholder is not.
+- Port defaults to `5432` and user to `postgres`, matching a direct connection; change them for a pooled connection (port `6543`) or a custom role.
+- SSL defaults **on**, since hosted Supabase requires it. Turn it off only for a local `supabase start` database.
+- Fields already typed into the form take precedence over anything the pasted string carries.
 
 ### Explorer
 - Lazy hierarchy of **connection → catalog → schema → Tables/Views → table → column**, fetched only when you expand a node.
@@ -108,7 +126,7 @@ Queries without a `LIMIT` could otherwise pull an entire table into memory. The 
 | `SQL: Run Statement` | Run one statement into the shared results tab. |
 | `SQL: Run Statement in New Tab` | Run one statement into its own results tab. |
 | `SQL: Select Connection for This Query` | Point the current editor at a different connection, without changing the active one. |
-| `SQL: Select Catalog or Database for This Query` | Switch the catalog (Trino) or database (PostgreSQL) the current editor runs against. |
+| `SQL: Select Catalog or Database for This Query` | Switch the catalog (Trino) or database (PostgreSQL/Supabase) the current editor runs against. |
 
 ### Settings
 
