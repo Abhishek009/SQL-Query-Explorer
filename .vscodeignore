@@ -6,11 +6,28 @@
 # Its source map is kept so user-reported stack traces stay readable.
 src/**
 **/*.ts
+**/*.mts
 out/**
 esbuild.mjs
 
-# All dependencies are devDependencies, so nothing is needed at runtime
+# Test suite and its config — never shipped, and .env.test carries real
+# credentials for whichever server it was last pointed at, so this is not
+# just tidiness. .vscodeignore is independent of .gitignore; nothing there
+# keeps a file out of the package.
+test/**
+.env
+.env.*
+scripts/**
+
+# pg is bundled into dist/extension.js by esbuild, so it needs nothing here.
+# better-sqlite3 is a native addon (a compiled .node binary) that esbuild
+# cannot bundle, so its whole package directory ships as-is instead — vsce
+# does not reliably support re-excluding paths nested under a negated
+# directory, so this also carries its build-only source/headers (~10MB) that
+# nothing at runtime touches. Trimming that requires deleting those files from
+# node_modules before packaging, not a smarter ignore pattern.
 node_modules/**
+!node_modules/better-sqlite3/**
 
 # Build and repo config
 tsconfig.json

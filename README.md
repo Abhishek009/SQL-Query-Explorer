@@ -2,7 +2,7 @@
 
 A VS Code extension for browsing database schemas and running SQL without leaving the editor.
 
-Supports **[Trino](https://trino.io)**, **[PostgreSQL](https://www.postgresql.org)**, and **[Supabase](https://supabase.com)**. The explorer, results grid, and editor features are shared by all of them, so further engines slot in behind the same interface.
+Supports **[Trino](https://trino.io)**, **[PostgreSQL](https://www.postgresql.org)**, **[Supabase](https://supabase.com)**, and **[SQLite](https://www.sqlite.org)**. The explorer, results grid, and editor features are shared by all of them, so further engines slot in behind the same interface.
 
 ### Database support
 
@@ -11,21 +11,23 @@ Supports **[Trino](https://trino.io)**, **[PostgreSQL](https://www.postgresql.or
 | [Trino](https://trino.io) | Supported |
 | [PostgreSQL](https://www.postgresql.org) | Supported |
 | [Supabase](https://supabase.com) | Supported |
+| [SQLite](https://www.sqlite.org) | Supported |
 | [MySQL](https://www.mysql.com) | Not yet supported |
 | [Snowflake](https://www.snowflake.com) | Not yet supported |
 
 ## Features
 
 ### Connections
-- **Pick the engine when adding a connection** — Trino, PostgreSQL, or Supabase — and the form shows only the fields that engine needs.
+- **Pick the engine when adding a connection** — Trino, PostgreSQL, Supabase, or SQLite — and the form shows only the fields that engine needs.
 - **Test Connection** runs a real query against the details you typed, before saving anything.
 - **Manage several servers at once** — dev, staging, and production sit side by side in the **Connections** view. Add one with the **+** button, then edit, remove, or refresh each from its context menu.
 - One connection is **active** for queries at a time; right-click → **Use Connection for Queries** to switch.
 - **Paste a JDBC connection string or a full URL into the Host field** and the rest of the form fills itself in — see [Connection URL formats](#connection-url-formats).
 - **Supabase** gets its own tab in **Connect To DB**. Paste the project's **Connection string** (from Project Settings → Database) or just its project ref into the Host field and the host, port, user, and database fill themselves in — see [Supabase connections](#supabase-connections).
+- **SQLite** gets its own tab too, with nothing but a **Database file** field and a native **Browse…** picker — no host, port, user, password, or SSL, since it's a local file rather than a server. See [SQLite connections](#sqlite-connections).
 - Passwords are stored in **VS Code Secret Storage**, never in `settings.json`.
-- Trino traffic goes through the `/v1/statement` REST endpoint; PostgreSQL and Supabase use the native Postgres wire protocol.
-- For PostgreSQL and Supabase the tree's top level lists **databases** on the server, so siblings of the one you opened are browsable too.
+- Trino traffic goes through the `/v1/statement` REST endpoint; PostgreSQL and Supabase use the native Postgres wire protocol; SQLite opens the file directly on disk.
+- For PostgreSQL and Supabase the tree's top level lists **databases** on the server, so siblings of the one you opened are browsable too. For SQLite the file itself is the only database, so the tree goes straight to its tables and views.
 
 #### Connection URL formats
 
@@ -64,6 +66,32 @@ Details:
 - SSL defaults **on**, since hosted Supabase requires it. Turn it off only for a local `supabase start` database.
 - Fields already typed into the form take precedence over anything the pasted string carries.
 
+#### SQLite connections
+
+SQLite has no server to point at — the file on disk *is* the database — so the **SQLite** tab is just a **Database file** field, a **Browse…** button, and a **New Database…** button, all backed by VS Code's native file pickers. There's no host, port, user, password, or SSL to configure, and **Test Connection** simply opens the file and reads its `sqlite_version()`.
+
+Details:
+- **Browse…** points at a `.db`/`.sqlite` file that already exists; **New Database…** opens a native Save dialog and creates an empty file wherever you choose, ready to connect to immediately.
+- The connection stores an absolute path; moving or renaming the file breaks it the same way a renamed folder would in any other tool — edit the connection and browse to the new location.
+- The tree's top level goes straight to **Tables/Views**, skipping the database picker that Postgres/Supabase show, since one file only ever has one database.
+- Table DDL is the table's own literal `CREATE TABLE`/`CREATE VIEW` statement, exactly as SQLite stored it — not reassembled from catalog metadata like PostgreSQL's is.
+- Runs through [`better-sqlite3`](https://github.com/WiseLibs/better-sqlite3), a native module shipped with prebuilt binaries for macOS, Windows, and Linux (x64 and arm64) so nothing needs compiling on install.
+
+#### Importing CSV data
+
+Right-click any table (not a view) and choose **Import Data from CSV…** to load rows from a local file without hand-writing `INSERT` statements:
+
+1. Pick a `.csv` file. The first row is always treated as the header.
+2. A mapping screen shows every column in the table beside a dropdown of the file's columns — pre-matched by name where they agree, otherwise left to **Skip**. A preview of the first few file rows sits below it so you can sanity-check before committing.
+3. Optionally check **Delete existing rows first** to replace the table's contents rather than append to them.
+4. **Import** runs ordinary batched `INSERT` statements (500 rows per statement) through the same connection, so it works identically across Trino, PostgreSQL, Supabase, and SQLite — no per-engine import path.
+
+Details:
+- A cell is inserted as a number only when the *target column's* declared type looks numeric (`INTEGER`, `REAL`, `DECIMAL`, …); otherwise it's inserted as a quoted string. A numeric column with unparseable text in a given row gets `NULL` for that cell rather than failing the whole import.
+- An empty cell always becomes `NULL`, regardless of column type.
+- If a batch fails partway through, the import stops there and reports how many rows made it in before the error — earlier batches are not rolled back.
+- There's no Excel (`.xlsx`) support yet, only CSV.
+
 ### Explorer
 - Lazy hierarchy of **connection → catalog → schema → Tables/Views → table → column**, fetched only when you expand a node.
 - **Tables and views are grouped into folders** with counts, for example `Tables (10)` and `Views (3)`.
@@ -71,6 +99,7 @@ Details:
 - **Double-click a table** to preview its rows, or use the inline preview icon / context menu for a single click.
 - **New Query Here** — hover a catalog, schema, table, or view and click the new-file icon to open a SQL editor already scoped to it, with that connection made active.
 - **Right-click a table or view → Show Table DDL** to open its `SHOW CREATE TABLE` / `SHOW CREATE VIEW` output in a SQL editor.
+- **Right-click a table → Import Data from CSV…** to load rows from a local `.csv` file. Match each table column to a file column (defaulted by matching names), preview the first rows, optionally clear the table first, then import — works against any engine, since it runs as ordinary batched `INSERT` statements through the same connection. See [Importing CSV data](#importing-csv-data).
 
 ### SQL editor and execution
 - **SQL: New SQL Query** opens a native VS Code SQL editor, so normal editing, syntax highlighting, and GitHub Copilot all work.
@@ -120,13 +149,14 @@ Queries without a `LIMIT` could otherwise pull an entire table into memory. The 
 | `SQL: Run SQL Query` | Execute the selection, or the whole editor if nothing is selected. |
 | `SQL: Preview Table Data` | Run a bounded `SELECT` against the selected table. |
 | `SQL: Show Table DDL` | Open `SHOW CREATE TABLE` output for the selected table. |
+| `SQL: Import Data from CSV…` | Load rows from a local CSV file into the selected table. |
 | `New Query Here` | Open a SQL editor scoped to the selected node. |
 | `SQL: Refresh Catalogs` | Reload the tree and clear cached metadata. |
 | `SQL: Cancel Running Query` | Stop a running query on the coordinator. |
 | `SQL: Run Statement` | Run one statement into the shared results tab. |
 | `SQL: Run Statement in New Tab` | Run one statement into its own results tab. |
 | `SQL: Select Connection for This Query` | Point the current editor at a different connection, without changing the active one. |
-| `SQL: Select Catalog or Database for This Query` | Switch the catalog (Trino) or database (PostgreSQL/Supabase) the current editor runs against. |
+| `SQL: Select Catalog or Database for This Query` | Switch the catalog (Trino) or database (PostgreSQL/Supabase/SQLite) the current editor runs against. |
 
 ### Settings
 

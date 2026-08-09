@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { randomUUID } from 'crypto';
+import * as path from 'path';
 import { ErrorState, ResultsState, StoredConnection, TrinoQueryResult, TrinoRequestError } from './types';
 import { ConnectionStore, passwordKey } from './connectionStore';
 import { SqlClient, createClient } from './client';
@@ -8,10 +9,11 @@ import { ResultsSurface, ResultsTabs } from './resultsView';
 import { QueryStatusProvider } from './queryStatus';
 import { QueryScope } from './queryScope';
 import { RunningQueryRegistry } from './runningQueries';
-import { ConnectionMessage, connectionFormHtml, isConnectionMessage, parseMaxRows, validateConnection } from './connectionForm';
-import { addressesByDatabase, engineOf, ENGINE_LABELS } from './client';
+import { ConnectionMessage, connectionFormHtml, isBrowseFileMessage, isConnectionMessage, isCreateFileMessage, parseMaxRows, validateConnection } from './connectionForm';
+import { createEmptyDatabase } from './engines/sqlite/sqliteClient';
+import { addressesByDatabase, closeAllClients, engineOf, ENGINE_LABELS } from './client';
 import { expandPastedUrl, parseConnectionUrl } from './engines/trino/trinoUrls';
-import { PostgresClient, hostAndPort } from './engines/postgres/postgresClient';
+import { hostAndPort } from './engines/postgres/postgresClient';
 import { expandPastedSupabaseUrl } from './engines/supabase/supabaseUrls';
 import { formatHost, previewRowLimit, quoteIdentifier, showConnectionError, summarize } from './util';
 
@@ -342,10 +344,28 @@ export async function showSqlResults(
 
 /** Turns the form fields into a connection, in the shape each engine expects. */
 export function connectionFromForm(request: ConnectionMessage, id: string): StoredConnection {
+    const defaultName = {
+        trino: 'Trino Connection', postgres: 'PostgreSQL Connection',
+        supabase: 'Supabase Connection', sqlite: 'SQLite Database'
+    }[request.engine];
+    if (request.engine === 'sqlite') {
+        const file = request.file.trim();
+        return {
+            id,
+            name: request.name.trim() || defaultName,
+            type: 'sqlite',
+            // A local file has no host/port/user — the path itself is the connection.
+            url: file,
+            user: '',
+            // Nothing else identifies "the database" for a single-file engine, but the
+            // lens and scope headers still want a name to show for it.
+            catalog: path.basename(file) || undefined,
+            maxRows: parseMaxRows(request.maxRows)
+        };
+    }
     const host = formatHost(request.host.trim());
     const port = request.port.trim();
     const wireProtocol = addressesByDatabase(request.engine);
-    const defaultName = { trino: 'Trino Connection', postgres: 'PostgreSQL Connection', supabase: 'Supabase Connection' }[request.engine];
     return {
         id,
         name: request.name.trim() || defaultName,
@@ -384,8 +404,8 @@ async function reportConnectionTest(
         const message = error instanceof Error ? error.message : String(error);
         void panel.webview.postMessage({ type: 'testResult', ok: false, message: summarize(message) });
     } finally {
-        // A test must not leave a pooled socket behind for an unsaved connection.
-        await PostgresClient.closeAll(candidate.id);
+        // A test must not leave a pooled socket or open file handle behind for an unsaved connection.
+        await closeAllClients(candidate.id);
     }
 }
 
@@ -396,10 +416,11 @@ export async function showConnectionWindow(
     existing: StoredConnection | undefined
 ): Promise<void> {
     const engine = engineOf(existing ?? { type: 'trino' } as StoredConnection);
-    const wireProtocol = addressesByDatabase(engine);
+    const isSqlite = engine === 'sqlite';
+    const wireProtocol = !isSqlite && addressesByDatabase(engine);
     // A new connection starts blank so the placeholder hints show and clear on
     // focus, rather than pre-filling fields the user would have to type over.
-    const current = existing
+    const current = existing && !isSqlite
         ? wireProtocol
             ? { ...hostAndPort(existing.url), sslEnabled: Boolean(existing.ssl) }
             : parseConnectionUrl(existing.url)
@@ -422,10 +443,37 @@ export async function showConnectionWindow(
         catalog: wireProtocol ? '' : (existing?.catalog ?? ''),
         schema: existing?.schema ?? '',
         database: wireProtocol ? (existing?.catalog ?? '') : '',
+        file: isSqlite ? (existing?.url ?? '') : '',
         maxRows: existing?.maxRows ? String(existing.maxRows) : ''
     }, Boolean(existing), hasPassword);
 
     panel.webview.onDidReceiveMessage(async (message: unknown) => {
+        if (isBrowseFileMessage(message)) {
+            const picked = await vscode.window.showOpenDialog({
+                canSelectMany: false,
+                title: 'Choose a SQLite database file',
+                filters: { 'SQLite database': ['db', 'sqlite', 'sqlite3', 'db3'], 'All files': ['*'] }
+            });
+            if (picked?.[0]) { void panel.webview.postMessage({ type: 'fileChosen', path: picked[0].fsPath }); }
+            return;
+        }
+        if (isCreateFileMessage(message)) {
+            const target = await vscode.window.showSaveDialog({
+                title: 'Create a new SQLite database',
+                saveLabel: 'Create Database',
+                filters: { 'SQLite database': ['db', 'sqlite', 'sqlite3', 'db3'] },
+                defaultUri: vscode.Uri.file('database.db')
+            });
+            if (!target) { return; }
+            try {
+                createEmptyDatabase(target.fsPath);
+                void panel.webview.postMessage({ type: 'fileChosen', path: target.fsPath });
+            } catch (error) {
+                const text = error instanceof Error ? error.message : String(error);
+                void panel.webview.postMessage({ type: 'error', message: `Could not create the database: ${text}` });
+            }
+            return;
+        }
         if (!isConnectionMessage(message)) { return; }
         const request = message.engine === 'supabase' ? expandPastedSupabaseUrl(message) : expandPastedUrl(message);
         const validation = validateConnection(request);
@@ -446,11 +494,11 @@ export async function showConnectionWindow(
         if (request.clearPassword) { await context.secrets.delete(passwordKey(id)); }
         else if (request.password) { await context.secrets.store(passwordKey(id), request.password); }
 
-        // Editing host/port must not leave a pool connected to the old server.
-        await PostgresClient.closeAll(id);
+        // Editing connection details must not leave a stale pool or file handle around.
+        await closeAllClients(id);
         provider.forget(id);
         panel.dispose();
-        vscode.window.showInformationMessage(`Trino connection saved: ${url}`);
+        vscode.window.showInformationMessage(`${ENGINE_LABELS[engineOf(candidate)]} connection saved: ${url}`);
         if (request.connect) {
             const saved = store.get(id);
             if (saved) {

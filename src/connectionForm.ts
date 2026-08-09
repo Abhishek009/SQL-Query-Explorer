@@ -2,10 +2,11 @@ import * as vscode from 'vscode';
 import { trinoFieldsHtml } from './engines/trino/trinoConnectionFields';
 import { postgresFieldsHtml } from './engines/postgres/postgresConnectionFields';
 import { supabaseFieldsHtml } from './engines/supabase/supabaseConnectionFields';
+import { sqliteFieldsHtml } from './engines/sqlite/sqliteConnectionFields';
 
 export interface ConnectionFormData {
     name: string;
-    engine: 'trino' | 'postgres' | 'supabase';
+    engine: 'trino' | 'postgres' | 'supabase' | 'sqlite';
     host: string;
     port: string;
     sslEnabled: boolean;
@@ -13,6 +14,8 @@ export interface ConnectionFormData {
     catalog: string;
     schema: string;
     database: string;
+    /** SQLite only: the local file path, which doubles as the connection's URL. */
+    file: string;
     maxRows: string;
 }
 
@@ -29,6 +32,16 @@ export function isConnectionMessage(value: unknown): value is ConnectionMessage 
     return typeof value === 'object' && value !== null && (type === 'save' || type === 'test');
 }
 
+/** The SQLite tab's Browse button, asking the extension host for a native file picker. */
+export function isBrowseFileMessage(value: unknown): value is { type: 'browseFile' } {
+    return typeof value === 'object' && value !== null && (value as { type?: unknown }).type === 'browseFile';
+}
+
+/** The SQLite tab's New Database button, asking the extension host to create an empty file. */
+export function isCreateFileMessage(value: unknown): value is { type: 'createFile' } {
+    return typeof value === 'object' && value !== null && (value as { type?: unknown }).type === 'createFile';
+}
+
 /** Blank means "use the global cap", so an empty field stores nothing. */
 export function parseMaxRows(value: string): number | undefined {
     const parsed = Number(value.trim());
@@ -36,6 +49,9 @@ export function parseMaxRows(value: string): number | undefined {
 }
 
 export function validateConnection(value: ConnectionMessage): string | undefined {
+    if (value.engine === 'sqlite') {
+        return value.file.trim() ? undefined : 'Choose a SQLite database file.';
+    }
     if (/:\/\//.test(value.host)) { return 'Could not read that URL. Use a host name, http(s)://host:port, or jdbc:trino://host:port.'; }
     if (!value.host.trim()) { return 'Enter a host name, an IP address, or paste a JDBC/HTTP URL.'; }
     if (!/^\d+$/.test(value.port.trim()) || Number(value.port) < 1 || Number(value.port) > 65535) { return 'Port must be between 1 and 65535.'; }
@@ -45,7 +61,7 @@ export function validateConnection(value: ConnectionMessage): string | undefined
 
 const BLANK: ConnectionFormData = {
     name: '', engine: 'trino', host: '', port: '', sslEnabled: false,
-    user: '', catalog: '', schema: '', database: '', maxRows: ''
+    user: '', catalog: '', schema: '', database: '', file: '', maxRows: ''
 };
 
 export function connectionFormHtml(webview: vscode.Webview, values: ConnectionFormData, isEdit: boolean, hasPassword: boolean): string {
@@ -56,6 +72,7 @@ export function connectionFormHtml(webview: vscode.Webview, values: ConnectionFo
     const trinoValues = values.engine === 'trino' ? values : { ...BLANK, engine: 'trino' as const };
     const postgresValues = values.engine === 'postgres' ? values : { ...BLANK, engine: 'postgres' as const };
     const supabaseValues = values.engine === 'supabase' ? values : { ...BLANK, engine: 'supabase' as const };
+    const sqliteValues = values.engine === 'sqlite' ? values : { ...BLANK, engine: 'sqlite' as const };
 
     const styles = `
 :root{--gap:12px;--radius:6px}
@@ -124,7 +141,8 @@ button:focus-visible{outline:2px solid var(--vscode-focusBorder,#2f7ce0);outline
 
     const isPostgres = values.engine === 'postgres';
     const isSupabase = values.engine === 'supabase';
-    const isTrino = !isPostgres && !isSupabase;
+    const isSqlite = values.engine === 'sqlite';
+    const isTrino = !isPostgres && !isSupabase && !isSqlite;
     const tab = (active: boolean) => active ? ' active' : '';
     const selected = (active: boolean) => active ? 'true' : 'false';
 
@@ -142,6 +160,7 @@ button:focus-visible{outline:2px solid var(--vscode-focusBorder,#2f7ce0);outline
     <button type="button" class="tab${tab(isTrino)}" data-pane="trino" data-engine="trino" role="tab" aria-selected="${selected(isTrino)}"><span class="tab-icon" style="background:#dd4b39">T</span>Trino</button>
     <button type="button" class="tab${tab(isPostgres)}" data-pane="postgres" data-engine="postgres" role="tab" aria-selected="${selected(isPostgres)}"><span class="tab-icon" style="background:#336791">P</span>PostgreSQL</button>
     <button type="button" class="tab${tab(isSupabase)}" data-pane="supabase" data-engine="supabase" role="tab" aria-selected="${selected(isSupabase)}"><span class="tab-icon" style="background:#3ecf8e">⚡</span>Supabase</button>
+    <button type="button" class="tab${tab(isSqlite)}" data-pane="sqlite" data-engine="sqlite" role="tab" aria-selected="${selected(isSqlite)}"><span class="tab-icon" style="background:#003b57">L</span>SQLite</button>
   </div>
   <form id="connection">
    <div class="pane${tab(isTrino)}" data-pane="trino">${trinoFieldsHtml(trinoValues, passwordHint, hasPassword)}
@@ -149,6 +168,8 @@ button:focus-visible{outline:2px solid var(--vscode-focusBorder,#2f7ce0);outline
    <div class="pane${tab(isPostgres)}" data-pane="postgres">${postgresFieldsHtml(postgresValues, passwordHint, hasPassword)}
    </div>
    <div class="pane${tab(isSupabase)}" data-pane="supabase">${supabaseFieldsHtml(supabaseValues, passwordHint, hasPassword)}
+   </div>
+   <div class="pane${tab(isSqlite)}" data-pane="sqlite">${sqliteFieldsHtml(sqliteValues)}
    </div>
    <div id="result" class="result" role="status"></div>
   </form>
@@ -164,7 +185,7 @@ button:focus-visible{outline:2px solid var(--vscode-focusBorder,#2f7ce0);outline
     const script = `const vscode=acquireVsCodeApi();
 const byId=id=>document.getElementById(id);
 let connect=true;
-let engine='${values.engine === 'postgres' ? 'postgres' : values.engine === 'supabase' ? 'supabase' : 'trino'}';
+let engine='${values.engine}';
 
 // Every tab just swaps which pane is visible; Trino/PostgreSQL additionally
 // pick which engine's fields payload() reads from at submit time.
@@ -201,7 +222,13 @@ function supabasePayload(kind){
     catalog:'',schema:'',database:byId('s-database').value,
     maxRows:byId('s-maxRows').value,connect};
 }
-function payload(kind){ return engine==='postgres' ? postgresPayload(kind) : engine==='supabase' ? supabasePayload(kind) : trinoPayload(kind); }
+function sqlitePayload(kind){
+  return {type:kind,engine:'sqlite',name:byId('l-name').value,host:'',port:'',sslEnabled:false,user:'',
+    password:'',clearPassword:false,catalog:'',schema:'',database:'',file:byId('l-file').value,
+    maxRows:byId('l-maxRows').value,connect};
+}
+const payloadByEngine={postgres:postgresPayload,supabase:supabasePayload,sqlite:sqlitePayload,trino:trinoPayload};
+function payload(kind){ return payloadByEngine[engine](kind); }
 
 document.querySelectorAll('button[type=submit]').forEach(b=>b.addEventListener('click',()=>{connect=b.dataset.connect==='true';}));
 byId('connection').addEventListener('submit',e=>{e.preventDefault();vscode.postMessage(payload('save'));});
@@ -211,6 +238,8 @@ byId('test').addEventListener('click',()=>{
   box.textContent='Testing connection…';
   vscode.postMessage(payload('test'));
 });
+byId('l-browse').addEventListener('click',()=>{ vscode.postMessage({type:'browseFile'}); });
+byId('l-new').addEventListener('click',()=>{ vscode.postMessage({type:'createFile'}); });
 window.addEventListener('message',e=>{
   if(e.data.type==='error'){
     const box=byId('error'); box.textContent=e.data.message; box.classList.add('show'); box.scrollIntoView({block:'nearest'});
@@ -221,8 +250,12 @@ window.addEventListener('message',e=>{
     box.textContent=e.data.message;
     box.scrollIntoView({block:'nearest'});
   }
+  if(e.data.type==='fileChosen'){
+    byId('l-file').value=e.data.path;
+  }
 });
-byId(engine==='postgres'?'p-host':engine==='supabase'?'s-host':'t-host').focus();`;
+const focusIds={trino:'t-host',postgres:'p-host',supabase:'s-host',sqlite:'l-file'};
+byId(focusIds[engine]).focus();`;
 
     return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Trino Connection</title><style>${styles}</style></head><body>${body}<script nonce="${nonce}">${script}</script></body></html>`;
 }

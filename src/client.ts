@@ -3,6 +3,7 @@ import { StoredConnection, TableEntry, TrinoColumn, TrinoQueryResult } from './t
 import { RunningQueryRegistry } from './runningQueries';
 import { TrinoClient } from './engines/trino/trinoClient';
 import { PostgresClient } from './engines/postgres/postgresClient';
+import { SqliteClient } from './engines/sqlite/sqliteClient';
 
 /**
  * What the explorer, completion, and query commands need from an engine. Every
@@ -40,21 +41,24 @@ export interface SqlClient {
     testConnection(token?: vscode.CancellationToken): Promise<string>;
 }
 
-export type EngineId = 'trino' | 'postgres' | 'supabase';
+export type EngineId = 'trino' | 'postgres' | 'supabase' | 'sqlite';
+
+const NON_TRINO_TYPES = new Set<StoredConnection['type']>(['postgres', 'supabase', 'sqlite']);
 
 /** Connections without a type predate Postgres support, so they are Trino. */
 export function engineOf(connection: StoredConnection): EngineId {
-    return connection.type === 'postgres' || connection.type === 'supabase' ? connection.type : 'trino';
+    return NON_TRINO_TYPES.has(connection.type) ? (connection.type as EngineId) : 'trino';
 }
 
 export const ENGINE_LABELS: Record<EngineId, string> = {
     trino: 'Trino',
     postgres: 'PostgreSQL',
-    supabase: 'Supabase'
+    supabase: 'Supabase',
+    sqlite: 'SQLite'
 };
 
-/** Supabase is hosted Postgres over the same wire protocol, so it addresses by
- *  database rather than catalog just like Postgres — everything but Trino does. */
+/** Everything but Trino addresses tables via a database (a Postgres/Supabase
+ *  database, or a SQLite file) rather than a catalog named inside the SQL itself. */
 export function addressesByDatabase(engine: EngineId): boolean {
     return engine !== 'trino';
 }
@@ -66,7 +70,20 @@ export function createClient(
     /** Used when testing details that have not been saved to Secret Storage yet. */
     password?: string
 ): SqlClient {
-    return addressesByDatabase(engineOf(connection))
-        ? new PostgresClient(secrets, connection, registry, password)
-        : new TrinoClient(secrets, connection, registry, password);
+    switch (engineOf(connection)) {
+        case 'sqlite': return new SqliteClient(secrets, connection, registry, password);
+        case 'postgres':
+        case 'supabase': return new PostgresClient(secrets, connection, registry, password);
+        default: return new TrinoClient(secrets, connection, registry, password);
+    }
+}
+
+/**
+ * Drops any pooled connection or open file handle for a connection, for when
+ * it is edited, removed, or tested with details that were never saved. Safe to
+ * call for every engine at once: whichever one did not open anything is a no-op.
+ */
+export async function closeAllClients(connectionId?: string): Promise<void> {
+    await PostgresClient.closeAll(connectionId);
+    SqliteClient.closeAll(connectionId);
 }

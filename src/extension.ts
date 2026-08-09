@@ -8,7 +8,8 @@ import { openScopedQuery, openSqlQueryEditor, pickConnection, previewTable, reso
 import { showConnectionError } from './util';
 import { RunningQueryRegistry, RunningQueryStatus, cancelRunningQuery } from './runningQueries';
 import { QueryScope } from './queryScope';
-import { PostgresClient } from './engines/postgres/postgresClient';
+import { closeAllClients } from './client';
+import { importDataFromFile } from './importData';
 
 export function activate(context: vscode.ExtensionContext): void {
     const store = new ConnectionStore(context);
@@ -63,7 +64,7 @@ export function activate(context: vscode.ExtensionContext): void {
         );
         if (confirmed !== 'Remove') { return; }
         await store.remove(connection.id);
-        await PostgresClient.closeAll(connection.id);
+        await closeAllClients(connection.id);
         provider.forget(connection.id);
         vscode.window.showInformationMessage(`Removed connection "${connection.name}".`);
     });
@@ -118,6 +119,9 @@ export function activate(context: vscode.ExtensionContext): void {
     });
     register('sqlExplorer.showTableDdl', async (item?: ExplorerItem) => {
         await showTableDdl(store, context.secrets, tabs, running, item);
+    });
+    register('sqlExplorer.importData', async (item?: ExplorerItem) => {
+        await importDataFromFile(store, context.secrets, provider, running, item);
     });
     register('sqlExplorer.openQuery', async () => { await openSqlQueryEditor(store, context.secrets); });
     register('sqlExplorer.runActiveSql', async () => { await runActiveSql(store, context.secrets, status, tabs, running, scope); });

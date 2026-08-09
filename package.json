@@ -2,8 +2,8 @@
   "name": "trino-explorer",
   "displayName": "SQL Query Explorer",
   "publisher": "big-tech-talk",
-  "description": "Browse schemas and run SQL from VS Code. Supports Trino, PostgreSQL, and Supabase.",
-  "version": "2.0.0",
+  "description": "Browse schemas and run SQL from VS Code. Supports Trino, PostgreSQL, Supabase, and SQLite.",
+  "version": "2.1.0",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -30,7 +30,8 @@
     "presto",
     "postgres",
     "postgresql",
-    "supabase"
+    "supabase",
+    "sqlite"
   ],
   "activationEvents": [
     "onLanguage:sql"
@@ -100,6 +101,11 @@
         "command": "sqlExplorer.showTableDdl",
         "title": "SQL: Show Table DDL",
         "icon": "$(file-code)"
+      },
+      {
+        "command": "sqlExplorer.importData",
+        "title": "SQL: Import Data from CSV…",
+        "icon": "$(cloud-upload)"
       },
       {
         "command": "sqlExplorer.refreshNode",
@@ -180,7 +186,8 @@
                 "enum": [
                   "trino",
                   "postgres",
-                  "supabase"
+                  "supabase",
+                  "sqlite"
                 ],
                 "description": "Engine this connection speaks. Absent means Trino."
               },
@@ -335,6 +342,10 @@
           "when": "false"
         },
         {
+          "command": "sqlExplorer.importData",
+          "when": "false"
+        },
+        {
           "command": "sqlExplorer.refreshNode",
           "when": "false"
         },
@@ -391,6 +402,11 @@
           "command": "sqlExplorer.showTableDdl",
           "when": "view == sqlExplorerConnections && viewItem =~ /^sqlExplorer\\.(table|view)$/",
           "group": "1_table@2"
+        },
+        {
+          "command": "sqlExplorer.importData",
+          "when": "view == sqlExplorerConnections && viewItem == sqlExplorer.table",
+          "group": "1_table@3"
         },
         {
           "command": "sqlExplorer.newQueryHere",
@@ -463,7 +479,7 @@
     ]
   },
   "scripts": {
-    "vscode:prepublish": "npm run bundle -- --production",
+    "vscode:prepublish": "npm run bundle -- --production && node scripts/trim-better-sqlite3.mjs",
     "bundle": "node esbuild.mjs",
     "compile": "tsc -p ./",
     "watch": "node esbuild.mjs --watch",
@@ -471,6 +487,7 @@
     "test:watch": "vitest"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^20.10.0",
     "@types/pg": "^8.20.4",
     "@types/vscode": "^1.85.0",
@@ -481,6 +498,7 @@
     "vitest": "^4.1.10"
   },
   "dependencies": {
+    "better-sqlite3": "^13.0.3",
     "pg": "^8.22.0"
   }
 }

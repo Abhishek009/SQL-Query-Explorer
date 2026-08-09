@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { StoredConnection } from './types';
 import { ConnectionStore } from './connectionStore';
-import { addressesByDatabase, engineOf } from './client';
+import { addressesByDatabase, engineOf, ENGINE_LABELS } from './client';
 
 /** Kept for editors written before the picker existed, and for hand-edited files. */
 export const CONNECTION_HEADER = /^\s*--\s*Connection:\s*(.+?)\s*$/im;
@@ -61,7 +61,8 @@ export class QueryScope {
     /** The label the lens shows for a database, or undefined when the engine has no such level. */
     public databaseLabel(scope: ResolvedScope): string | undefined {
         if (!scope.connection) { return undefined; }
-        return scope.database || (addressesByDatabase(engineOf(scope.connection)) ? 'postgres' : 'no catalog');
+        const engine = engineOf(scope.connection);
+        return scope.database || (addressesByDatabase(engine) ? ENGINE_LABELS[engine] : 'no catalog');
     }
 
     private byName(name: string | undefined): StoredConnection | undefined {
