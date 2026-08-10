@@ -104,15 +104,35 @@ export class TrinoExplorerProvider implements vscode.TreeDataProvider<ExplorerIt
 
     /**
      * Redraws one branch. Schemas, tables, and columns are fetched on expand and
-     * never cached here, so firing for the node is enough to re-query it. The
-     * table listing is cached, so drop it for the branch being refreshed.
+     * never cached here, so firing for the node is enough to re-query it. A group
+     * node ("Tables (N)"/"Views (N)") is the exception: its own label bakes in a
+     * count computed when its parent built it, and `getTreeItem` just hands the
+     * same object back — refreshing it would otherwise clear the cache correctly
+     * but leave the stale count on screen until something else redraws it.
      */
-    public refreshItem(item: ExplorerItem): void {
+    public async refreshItem(item: ExplorerItem): Promise<void> {
         if (item.connectionId) {
             const path = [item.connectionId, item.catalog, item.schema].filter(Boolean).join('/');
             this.forgetCached(item.catalog ? path : `${item.connectionId}/`);
         }
+        if (item.kind === 'group' && item.connectionId && item.catalog && item.schema && item.group) {
+            await this.relabelGroup(item, item.connectionId, item.catalog, item.schema, item.group);
+        }
         this.changed.fire(item);
+    }
+
+    private async relabelGroup(item: ExplorerItem, connectionId: string, catalog: string, schema: string, group: 'tables' | 'views'): Promise<void> {
+        const connection = this.store.get(connectionId);
+        if (!connection) { return; }
+        try {
+            const client = createClient(this.secrets, connection);
+            const entries = await this.tableEntries(client, connectionId, catalog, schema);
+            const count = entries.filter(entry => entry.view === (group === 'views')).length;
+            item.label = `${group === 'tables' ? 'Tables' : 'Views'} (${count.toLocaleString()})`;
+            item.collapsibleState = count === 0 ? vscode.TreeItemCollapsibleState.None : vscode.TreeItemCollapsibleState.Collapsed;
+        } catch (error) {
+            showConnectionError(error);
+        }
     }
 
     private forgetCached(prefix: string): void {

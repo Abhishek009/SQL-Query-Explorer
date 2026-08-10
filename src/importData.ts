@@ -110,14 +110,14 @@ export async function importDataFromFile(
                     }
                 }
             );
-            provider.refreshItem(item);
+            await provider.refreshItem(item);
             vscode.window.showInformationMessage(`Imported ${imported.toLocaleString()} row(s) into ${tableLabel}.`);
         } catch (error) {
             const text = error instanceof Error ? error.message : String(error);
             vscode.window.showErrorMessage(
                 `Import into ${tableLabel} stopped after ${imported.toLocaleString()} row(s): ${summarize(text)}`
             );
-            if (imported > 0) { provider.refreshItem(item); }
+            if (imported > 0) { await provider.refreshItem(item); }
         }
     }, undefined);
 }
