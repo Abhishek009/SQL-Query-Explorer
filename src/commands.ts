@@ -9,8 +9,10 @@ import { ResultsSurface, ResultsTabs } from './resultsView';
 import { QueryStatusProvider } from './queryStatus';
 import { QueryScope } from './queryScope';
 import { RunningQueryRegistry } from './runningQueries';
-import { ConnectionMessage, connectionFormHtml, isBrowseFileMessage, isConnectionMessage, isCreateFileMessage, parseMaxRows, validateConnection } from './connectionForm';
+import { ConnectionMessage, connectionFormHtml, isBrowseFileMessage, isCheckDuckdbMessage, isConnectionMessage, isCreateFileMessage, isInstallDuckdbMessage, parseMaxRows, validateConnection } from './connectionForm';
 import { createEmptyDatabase } from './engines/sqlite/sqliteClient';
+import { createEmptyDuckdb } from './engines/duckdb/duckdbClient';
+import { installDuckdb, isDuckdbInstalled } from './engines/duckdb/duckdbRuntime';
 import { addressesByDatabase, closeAllClients, engineOf, ENGINE_LABELS } from './client';
 import { expandPastedUrl, parseConnectionUrl } from './engines/trino/trinoUrls';
 import { hostAndPort } from './engines/postgres/postgresClient';
@@ -345,15 +347,15 @@ export async function showSqlResults(
 /** Turns the form fields into a connection, in the shape each engine expects. */
 export function connectionFromForm(request: ConnectionMessage, id: string): StoredConnection {
     const defaultName = {
-        trino: 'Trino Connection', postgres: 'PostgreSQL Connection',
-        supabase: 'Supabase Connection', sqlite: 'SQLite Database'
+        trino: 'Trino Connection', postgres: 'PostgreSQL Connection', supabase: 'Supabase Connection',
+        sqlite: 'SQLite Database', duckdb: 'DuckDB Database'
     }[request.engine];
-    if (request.engine === 'sqlite') {
+    if (request.engine === 'sqlite' || request.engine === 'duckdb') {
         const file = request.file.trim();
         return {
             id,
             name: request.name.trim() || defaultName,
-            type: 'sqlite',
+            type: request.engine,
             // A local file has no host/port/user — the path itself is the connection.
             url: file,
             user: '',
@@ -416,11 +418,11 @@ export async function showConnectionWindow(
     existing: StoredConnection | undefined
 ): Promise<void> {
     const engine = engineOf(existing ?? { type: 'trino' } as StoredConnection);
-    const isSqlite = engine === 'sqlite';
-    const wireProtocol = !isSqlite && addressesByDatabase(engine);
+    const isLocalFile = engine === 'sqlite' || engine === 'duckdb';
+    const wireProtocol = !isLocalFile && addressesByDatabase(engine);
     // A new connection starts blank so the placeholder hints show and clear on
     // focus, rather than pre-filling fields the user would have to type over.
-    const current = existing && !isSqlite
+    const current = existing && !isLocalFile
         ? wireProtocol
             ? { ...hostAndPort(existing.url), sslEnabled: Boolean(existing.ssl) }
             : parseConnectionUrl(existing.url)
@@ -443,34 +445,56 @@ export async function showConnectionWindow(
         catalog: wireProtocol ? '' : (existing?.catalog ?? ''),
         schema: existing?.schema ?? '',
         database: wireProtocol ? (existing?.catalog ?? '') : '',
-        file: isSqlite ? (existing?.url ?? '') : '',
+        file: isLocalFile ? (existing?.url ?? '') : '',
         maxRows: existing?.maxRows ? String(existing.maxRows) : ''
     }, Boolean(existing), hasPassword);
 
     panel.webview.onDidReceiveMessage(async (message: unknown) => {
         if (isBrowseFileMessage(message)) {
+            const label = message.engine === 'sqlite' ? 'SQLite' : 'DuckDB';
+            const extensions = message.engine === 'sqlite' ? ['db', 'sqlite', 'sqlite3', 'db3'] : ['duckdb', 'db'];
             const picked = await vscode.window.showOpenDialog({
                 canSelectMany: false,
-                title: 'Choose a SQLite database file',
-                filters: { 'SQLite database': ['db', 'sqlite', 'sqlite3', 'db3'], 'All files': ['*'] }
+                title: `Choose a ${label} database file`,
+                filters: { [`${label} database`]: extensions, 'All files': ['*'] }
             });
-            if (picked?.[0]) { void panel.webview.postMessage({ type: 'fileChosen', path: picked[0].fsPath }); }
+            if (picked?.[0]) { void panel.webview.postMessage({ type: 'fileChosen', engine: message.engine, path: picked[0].fsPath }); }
             return;
         }
         if (isCreateFileMessage(message)) {
+            const label = message.engine === 'sqlite' ? 'SQLite' : 'DuckDB';
+            const extensions = message.engine === 'sqlite' ? ['db', 'sqlite', 'sqlite3', 'db3'] : ['duckdb', 'db'];
+            const defaultName = message.engine === 'sqlite' ? 'database.db' : 'database.duckdb';
             const target = await vscode.window.showSaveDialog({
-                title: 'Create a new SQLite database',
+                title: `Create a new ${label} database`,
                 saveLabel: 'Create Database',
-                filters: { 'SQLite database': ['db', 'sqlite', 'sqlite3', 'db3'] },
-                defaultUri: vscode.Uri.file('database.db')
+                filters: { [`${label} database`]: extensions },
+                defaultUri: vscode.Uri.file(defaultName)
             });
             if (!target) { return; }
             try {
-                createEmptyDatabase(target.fsPath);
-                void panel.webview.postMessage({ type: 'fileChosen', path: target.fsPath });
+                if (message.engine === 'sqlite') { createEmptyDatabase(target.fsPath); }
+                else { await createEmptyDuckdb(target.fsPath); }
+                void panel.webview.postMessage({ type: 'fileChosen', engine: message.engine, path: target.fsPath });
             } catch (error) {
                 const text = error instanceof Error ? error.message : String(error);
                 void panel.webview.postMessage({ type: 'error', message: `Could not create the database: ${text}` });
+            }
+            return;
+        }
+        if (isCheckDuckdbMessage(message)) {
+            void panel.webview.postMessage({ type: 'duckdbInstallStatus', installed: isDuckdbInstalled() });
+            return;
+        }
+        if (isInstallDuckdbMessage(message)) {
+            try {
+                await installDuckdb(line => {
+                    void panel.webview.postMessage({ type: 'duckdbInstallProgress', message: line.trim().split('\n').pop() || 'Installing…' });
+                });
+                void panel.webview.postMessage({ type: 'duckdbInstallDone', ok: true, message: 'DuckDB is installed and ready.' });
+            } catch (error) {
+                const text = error instanceof Error ? error.message : String(error);
+                void panel.webview.postMessage({ type: 'duckdbInstallDone', ok: false, message: `Install failed: ${summarize(text)}` });
             }
             return;
         }

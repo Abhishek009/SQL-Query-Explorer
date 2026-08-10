@@ -4,6 +4,7 @@ import { RunningQueryRegistry } from './runningQueries';
 import { TrinoClient } from './engines/trino/trinoClient';
 import { PostgresClient } from './engines/postgres/postgresClient';
 import { SqliteClient } from './engines/sqlite/sqliteClient';
+import { DuckdbClient } from './engines/duckdb/duckdbClient';
 
 /**
  * What the explorer, completion, and query commands need from an engine. Every
@@ -41,9 +42,9 @@ export interface SqlClient {
     testConnection(token?: vscode.CancellationToken): Promise<string>;
 }
 
-export type EngineId = 'trino' | 'postgres' | 'supabase' | 'sqlite';
+export type EngineId = 'trino' | 'postgres' | 'supabase' | 'sqlite' | 'duckdb';
 
-const NON_TRINO_TYPES = new Set<StoredConnection['type']>(['postgres', 'supabase', 'sqlite']);
+const NON_TRINO_TYPES = new Set<StoredConnection['type']>(['postgres', 'supabase', 'sqlite', 'duckdb']);
 
 /** Connections without a type predate Postgres support, so they are Trino. */
 export function engineOf(connection: StoredConnection): EngineId {
@@ -54,11 +55,12 @@ export const ENGINE_LABELS: Record<EngineId, string> = {
     trino: 'Trino',
     postgres: 'PostgreSQL',
     supabase: 'Supabase',
-    sqlite: 'SQLite'
+    sqlite: 'SQLite',
+    duckdb: 'DuckDB'
 };
 
 /** Everything but Trino addresses tables via a database (a Postgres/Supabase
- *  database, or a SQLite file) rather than a catalog named inside the SQL itself. */
+ *  database, or a SQLite/DuckDB file) rather than a catalog named inside the SQL itself. */
 export function addressesByDatabase(engine: EngineId): boolean {
     return engine !== 'trino';
 }
@@ -72,6 +74,7 @@ export function createClient(
 ): SqlClient {
     switch (engineOf(connection)) {
         case 'sqlite': return new SqliteClient(secrets, connection, registry, password);
+        case 'duckdb': return new DuckdbClient(secrets, connection);
         case 'postgres':
         case 'supabase': return new PostgresClient(secrets, connection, registry, password);
         default: return new TrinoClient(secrets, connection, registry, password);
@@ -86,4 +89,5 @@ export function createClient(
 export async function closeAllClients(connectionId?: string): Promise<void> {
     await PostgresClient.closeAll(connectionId);
     SqliteClient.closeAll(connectionId);
+    DuckdbClient.closeAll(connectionId);
 }

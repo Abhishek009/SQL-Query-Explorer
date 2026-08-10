@@ -48,3 +48,8 @@ tmp/
 temp/
 *.tmp
 *.bak
+
+# Optional local cache for the DuckDB integration tests — not required to run
+# the suite (those tests skip themselves without it); populate with
+# `npm install @duckdb/node-api --prefix .duckdb-test-cache` to enable them.
+.duckdb-test-cache/

@@ -10,8 +10,10 @@ import { RunningQueryRegistry, RunningQueryStatus, cancelRunningQuery } from './
 import { QueryScope } from './queryScope';
 import { closeAllClients } from './client';
 import { importDataFromFile } from './importData';
+import { initDuckdbRuntime } from './engines/duckdb/duckdbRuntime';
 
 export function activate(context: vscode.ExtensionContext): void {
+    initDuckdbRuntime(context);
     const store = new ConnectionStore(context);
     const provider = new TrinoExplorerProvider(store, context.secrets, context.extensionUri);
     const scope = new QueryScope(store);
@@ -102,7 +104,7 @@ export function activate(context: vscode.ExtensionContext): void {
         }
         // Cached metadata would otherwise keep serving the pre-refresh names.
         completions.clear();
-        provider.refreshItem(item);
+        await provider.refreshItem(item);
     });
     register('sqlExplorer.configureConnection', async () => {
         const connection = store.get(store.activeId);

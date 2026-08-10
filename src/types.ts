@@ -6,7 +6,7 @@ export interface StoredConnection {
     url: string;
     user: string;
     /** Engine this connection speaks; absent means Trino, from before Postgres. */
-    type?: 'trino' | 'postgres' | 'supabase' | 'sqlite';
+    type?: 'trino' | 'postgres' | 'supabase' | 'sqlite' | 'duckdb';
     catalog?: string;
     schema?: string;
     /** Postgres/Supabase only: TLS to the server. Trino carries this in its URL scheme. */

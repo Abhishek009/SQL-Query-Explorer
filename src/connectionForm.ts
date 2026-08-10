@@ -3,10 +3,11 @@ import { trinoFieldsHtml } from './engines/trino/trinoConnectionFields';
 import { postgresFieldsHtml } from './engines/postgres/postgresConnectionFields';
 import { supabaseFieldsHtml } from './engines/supabase/supabaseConnectionFields';
 import { sqliteFieldsHtml } from './engines/sqlite/sqliteConnectionFields';
+import { duckdbFieldsHtml } from './engines/duckdb/duckdbConnectionFields';
 
 export interface ConnectionFormData {
     name: string;
-    engine: 'trino' | 'postgres' | 'supabase' | 'sqlite';
+    engine: 'trino' | 'postgres' | 'supabase' | 'sqlite' | 'duckdb';
     host: string;
     port: string;
     sslEnabled: boolean;
@@ -14,7 +15,7 @@ export interface ConnectionFormData {
     catalog: string;
     schema: string;
     database: string;
-    /** SQLite only: the local file path, which doubles as the connection's URL. */
+    /** SQLite/DuckDB only: the local file path, which doubles as the connection's URL. */
     file: string;
     maxRows: string;
 }
@@ -32,14 +33,27 @@ export function isConnectionMessage(value: unknown): value is ConnectionMessage 
     return typeof value === 'object' && value !== null && (type === 'save' || type === 'test');
 }
 
-/** The SQLite tab's Browse button, asking the extension host for a native file picker. */
-export function isBrowseFileMessage(value: unknown): value is { type: 'browseFile' } {
+/** The SQLite/DuckDB tabs share a "local file" shape, tagged by which engine asked. */
+export type FileEngine = 'sqlite' | 'duckdb';
+
+/** The Browse button, asking the extension host for a native file picker. */
+export function isBrowseFileMessage(value: unknown): value is { type: 'browseFile'; engine: FileEngine } {
     return typeof value === 'object' && value !== null && (value as { type?: unknown }).type === 'browseFile';
 }
 
-/** The SQLite tab's New Database button, asking the extension host to create an empty file. */
-export function isCreateFileMessage(value: unknown): value is { type: 'createFile' } {
+/** The New Database button, asking the extension host to create an empty file. */
+export function isCreateFileMessage(value: unknown): value is { type: 'createFile'; engine: FileEngine } {
     return typeof value === 'object' && value !== null && (value as { type?: unknown }).type === 'createFile';
+}
+
+/** The DuckDB tab asking whether its native module is already downloaded. */
+export function isCheckDuckdbMessage(value: unknown): value is { type: 'checkDuckdb' } {
+    return typeof value === 'object' && value !== null && (value as { type?: unknown }).type === 'checkDuckdb';
+}
+
+/** The DuckDB tab's Install button. */
+export function isInstallDuckdbMessage(value: unknown): value is { type: 'installDuckdb' } {
+    return typeof value === 'object' && value !== null && (value as { type?: unknown }).type === 'installDuckdb';
 }
 
 /** Blank means "use the global cap", so an empty field stores nothing. */
@@ -49,8 +63,8 @@ export function parseMaxRows(value: string): number | undefined {
 }
 
 export function validateConnection(value: ConnectionMessage): string | undefined {
-    if (value.engine === 'sqlite') {
-        return value.file.trim() ? undefined : 'Choose a SQLite database file.';
+    if (value.engine === 'sqlite' || value.engine === 'duckdb') {
+        return value.file.trim() ? undefined : `Choose a ${value.engine === 'sqlite' ? 'SQLite' : 'DuckDB'} database file.`;
     }
     if (/:\/\//.test(value.host)) { return 'Could not read that URL. Use a host name, http(s)://host:port, or jdbc:trino://host:port.'; }
     if (!value.host.trim()) { return 'Enter a host name, an IP address, or paste a JDBC/HTTP URL.'; }
@@ -73,6 +87,7 @@ export function connectionFormHtml(webview: vscode.Webview, values: ConnectionFo
     const postgresValues = values.engine === 'postgres' ? values : { ...BLANK, engine: 'postgres' as const };
     const supabaseValues = values.engine === 'supabase' ? values : { ...BLANK, engine: 'supabase' as const };
     const sqliteValues = values.engine === 'sqlite' ? values : { ...BLANK, engine: 'sqlite' as const };
+    const duckdbValues = values.engine === 'duckdb' ? values : { ...BLANK, engine: 'duckdb' as const };
 
     const styles = `
 :root{--gap:12px;--radius:6px}
@@ -122,6 +137,11 @@ code{background:var(--vscode-textCodeBlock-background,rgba(128,128,128,.16));pad
 .result.bad{color:var(--vscode-inputValidation-errorForeground,var(--vscode-foreground));background:var(--vscode-inputValidation-errorBackground,rgba(190,60,60,.16));border:1px solid var(--vscode-inputValidation-errorBorder,rgba(190,60,60,.7))}
 .result.busy{color:var(--vscode-descriptionForeground);background:rgba(128,128,128,.12);border:1px solid var(--vscode-panel-border,rgba(128,128,128,.35))}
 .alert::before{content:"\\26A0";flex:0 0 auto}
+.install-banner{display:flex;align-items:center;gap:10px;margin-bottom:14px;padding:9px 12px;border-radius:4px;font-size:.92em;color:var(--vscode-descriptionForeground);background:rgba(128,128,128,.12);border:1px solid var(--vscode-panel-border,rgba(128,128,128,.35))}
+.install-banner.missing{color:var(--vscode-inputValidation-warningForeground,var(--vscode-foreground));background:var(--vscode-inputValidation-warningBackground,rgba(190,150,60,.16));border-color:var(--vscode-inputValidation-warningBorder,rgba(190,150,60,.7))}
+.install-banner.ready{color:var(--vscode-testing-iconPassed,#2ea043);background:rgba(46,160,67,.12);border-color:rgba(46,160,67,.5)}
+.install-banner.error{color:var(--vscode-inputValidation-errorForeground,var(--vscode-foreground));background:var(--vscode-inputValidation-errorBackground,rgba(190,60,60,.16));border-color:var(--vscode-inputValidation-errorBorder,rgba(190,60,60,.7))}
+.install-banner span{flex:1 1 auto;white-space:pre-wrap;word-break:break-word}
 .actions{position:fixed;left:0;right:0;bottom:0;display:flex;justify-content:flex-end;gap:10px;padding:14px 20px;background:var(--vscode-editor-background,#1f1f1f);border-top:1px solid var(--vscode-panel-border,rgba(128,128,128,.3))}
 .actions-inner{width:100%;max-width:640px;margin:0 auto;display:flex;justify-content:flex-end;gap:10px}
 .tabs-label{margin:0 0 8px;font-size:.78em;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--vscode-descriptionForeground)}
@@ -142,7 +162,8 @@ button:focus-visible{outline:2px solid var(--vscode-focusBorder,#2f7ce0);outline
     const isPostgres = values.engine === 'postgres';
     const isSupabase = values.engine === 'supabase';
     const isSqlite = values.engine === 'sqlite';
-    const isTrino = !isPostgres && !isSupabase && !isSqlite;
+    const isDuckdb = values.engine === 'duckdb';
+    const isTrino = !isPostgres && !isSupabase && !isSqlite && !isDuckdb;
     const tab = (active: boolean) => active ? ' active' : '';
     const selected = (active: boolean) => active ? 'true' : 'false';
 
@@ -161,6 +182,7 @@ button:focus-visible{outline:2px solid var(--vscode-focusBorder,#2f7ce0);outline
     <button type="button" class="tab${tab(isPostgres)}" data-pane="postgres" data-engine="postgres" role="tab" aria-selected="${selected(isPostgres)}"><span class="tab-icon" style="background:#336791">P</span>PostgreSQL</button>
     <button type="button" class="tab${tab(isSupabase)}" data-pane="supabase" data-engine="supabase" role="tab" aria-selected="${selected(isSupabase)}"><span class="tab-icon" style="background:#3ecf8e">⚡</span>Supabase</button>
     <button type="button" class="tab${tab(isSqlite)}" data-pane="sqlite" data-engine="sqlite" role="tab" aria-selected="${selected(isSqlite)}"><span class="tab-icon" style="background:#003b57">L</span>SQLite</button>
+    <button type="button" class="tab${tab(isDuckdb)}" data-pane="duckdb" data-engine="duckdb" role="tab" aria-selected="${selected(isDuckdb)}"><span class="tab-icon" style="background:#fff000;color:#000">D</span>DuckDB</button>
   </div>
   <form id="connection">
    <div class="pane${tab(isTrino)}" data-pane="trino">${trinoFieldsHtml(trinoValues, passwordHint, hasPassword)}
@@ -170,6 +192,8 @@ button:focus-visible{outline:2px solid var(--vscode-focusBorder,#2f7ce0);outline
    <div class="pane${tab(isSupabase)}" data-pane="supabase">${supabaseFieldsHtml(supabaseValues, passwordHint, hasPassword)}
    </div>
    <div class="pane${tab(isSqlite)}" data-pane="sqlite">${sqliteFieldsHtml(sqliteValues)}
+   </div>
+   <div class="pane${tab(isDuckdb)}" data-pane="duckdb">${duckdbFieldsHtml(duckdbValues)}
    </div>
    <div id="result" class="result" role="status"></div>
   </form>
@@ -227,7 +251,12 @@ function sqlitePayload(kind){
     password:'',clearPassword:false,catalog:'',schema:'',database:'',file:byId('l-file').value,
     maxRows:byId('l-maxRows').value,connect};
 }
-const payloadByEngine={postgres:postgresPayload,supabase:supabasePayload,sqlite:sqlitePayload,trino:trinoPayload};
+function duckdbPayload(kind){
+  return {type:kind,engine:'duckdb',name:byId('d-name').value,host:'',port:'',sslEnabled:false,user:'',
+    password:'',clearPassword:false,catalog:'',schema:'',database:'',file:byId('d-file').value,
+    maxRows:byId('d-maxRows').value,connect};
+}
+const payloadByEngine={postgres:postgresPayload,supabase:supabasePayload,sqlite:sqlitePayload,duckdb:duckdbPayload,trino:trinoPayload};
 function payload(kind){ return payloadByEngine[engine](kind); }
 
 document.querySelectorAll('button[type=submit]').forEach(b=>b.addEventListener('click',()=>{connect=b.dataset.connect==='true';}));
@@ -238,11 +267,42 @@ byId('test').addEventListener('click',()=>{
   box.textContent='Testing connection…';
   vscode.postMessage(payload('test'));
 });
-byId('l-browse').addEventListener('click',()=>{ vscode.postMessage({type:'browseFile'}); });
-byId('l-new').addEventListener('click',()=>{ vscode.postMessage({type:'createFile'}); });
+byId('l-browse').addEventListener('click',()=>{ vscode.postMessage({type:'browseFile',engine:'sqlite'}); });
+byId('l-new').addEventListener('click',()=>{ vscode.postMessage({type:'createFile',engine:'sqlite'}); });
+byId('d-browse').addEventListener('click',()=>{ vscode.postMessage({type:'browseFile',engine:'duckdb'}); });
+byId('d-new').addEventListener('click',()=>{ vscode.postMessage({type:'createFile',engine:'duckdb'}); });
+
+const duckdbBanner=byId('duckdb-install-banner'), duckdbText=byId('duckdb-install-text'), duckdbButton=byId('duckdb-install-button');
+function setDuckdbBanner(state,text){
+  duckdbBanner.className='install-banner '+state;
+  duckdbText.textContent=text;
+  duckdbButton.hidden=state!=='missing';
+}
+duckdbButton.addEventListener('click',()=>{
+  setDuckdbBanner('checking','Installing DuckDB (this can take a minute)…');
+  vscode.postMessage({type:'installDuckdb'});
+});
+let duckdbChecked=false;
+function ensureDuckdbChecked(){
+  if(duckdbChecked){ return; }
+  duckdbChecked=true;
+  vscode.postMessage({type:'checkDuckdb'});
+}
+document.querySelector('.tab[data-engine="duckdb"]').addEventListener('click', ensureDuckdbChecked);
+if(engine==='duckdb'){ ensureDuckdbChecked(); }
+
 window.addEventListener('message',e=>{
   if(e.data.type==='error'){
     const box=byId('error'); box.textContent=e.data.message; box.classList.add('show'); box.scrollIntoView({block:'nearest'});
+  }
+  if(e.data.type==='duckdbInstallStatus'){
+    setDuckdbBanner(e.data.installed?'ready':'missing', e.data.installed?'DuckDB is installed and ready.':'DuckDB is not installed yet (~100MB download).');
+  }
+  if(e.data.type==='duckdbInstallProgress'){
+    setDuckdbBanner('checking', e.data.message);
+  }
+  if(e.data.type==='duckdbInstallDone'){
+    setDuckdbBanner(e.data.ok?'ready':'error', e.data.message);
   }
   if(e.data.type==='testResult'){
     const box=byId('result');
@@ -251,10 +311,10 @@ window.addEventListener('message',e=>{
     box.scrollIntoView({block:'nearest'});
   }
   if(e.data.type==='fileChosen'){
-    byId('l-file').value=e.data.path;
+    byId(e.data.engine==='duckdb'?'d-file':'l-file').value=e.data.path;
   }
 });
-const focusIds={trino:'t-host',postgres:'p-host',supabase:'s-host',sqlite:'l-file'};
+const focusIds={trino:'t-host',postgres:'p-host',supabase:'s-host',sqlite:'l-file',duckdb:'d-file'};
 byId(focusIds[engine]).focus();`;
 
     return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Trino Connection</title><style>${styles}</style></head><body>${body}<script nonce="${nonce}">${script}</script></body></html>`;

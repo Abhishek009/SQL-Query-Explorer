@@ -18,6 +18,10 @@ test/**
 .env
 .env.*
 scripts/**
+# The DuckDB integration tests' opt-in local cache — never installed for a
+# real user, only present if a contributor deliberately fetched it to test
+# against a real engine (see test/engines/duckdbClient.test.ts).
+.duckdb-test-cache/**
 
 # pg is bundled into dist/extension.js by esbuild, so it needs nothing here.
 # better-sqlite3 is a native addon (a compiled .node binary) that esbuild
