@@ -1,15 +1,17 @@
 import { build, context } from 'esbuild';
 
-// The extension now has real runtime dependencies (pg, better-sqlite3), and
-// .vscodeignore keeps node_modules out of the package, so everything must be
-// bundled into one file — except better-sqlite3, which is a native addon
-// (a compiled .node binary) that cannot be bundled into JS. It stays a real
-// require() and .vscodeignore carves out its own package directory instead.
+// pg is a real runtime dependency, and .vscodeignore keeps node_modules out
+// of the package, so it is bundled into this one file like everything else.
+// SQLite (better-sqlite3) and DuckDB (@duckdb/node-api) are native modules
+// downloaded on demand rather than bundled — see sqliteClient.ts/duckdbClient.ts
+// — so they are never project dependencies for esbuild to find in the first
+// place; their `require()` calls are dynamic (computed paths, not literal
+// specifiers) specifically so esbuild leaves them alone.
 const options = {
     entryPoints: ['src/extension.ts'],
     bundle: true,
     outfile: 'dist/extension.js',
-    external: ['vscode', 'better-sqlite3'],
+    external: ['vscode'],
     format: 'cjs',
     platform: 'node',
     target: 'node18',

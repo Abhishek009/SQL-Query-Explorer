@@ -25,8 +25,8 @@ Supports **[Trino](https://trino.io)**, **[PostgreSQL](https://www.postgresql.or
 - One connection is **active** for queries at a time; right-click → **Use Connection for Queries** to switch.
 - **Paste a JDBC connection string or a full URL into the Host field** and the rest of the form fills itself in — see [Connection URL formats](#connection-url-formats).
 - **Supabase** gets its own tab in **Connect To DB**. Paste the project's **Connection string** (from Project Settings → Database) or just its project ref into the Host field and the host, port, user, and database fill themselves in — see [Supabase connections](#supabase-connections).
-- **SQLite** gets its own tab too, with nothing but a **Database file** field and native **Browse…**/**New Database…** pickers — no host, port, user, password, or SSL, since it's a local file rather than a server. See [SQLite connections](#sqlite-connections).
-- **DuckDB** gets a tab with the same local-file shape as SQLite, plus a one-time **Install** step — see [DuckDB connections](#duckdb-connections).
+- **SQLite** gets its own tab too, with nothing but a **Database file** field, native **Browse…**/**New Database…** pickers, and a one-time **Install** step — no host, port, user, password, or SSL, since it's a local file rather than a server. See [SQLite connections](#sqlite-connections).
+- **DuckDB** gets a tab with the same local-file shape and install step as SQLite — see [DuckDB connections](#duckdb-connections).
 - Passwords are stored in **VS Code Secret Storage**, never in `settings.json`.
 - Trino traffic goes through the `/v1/statement` REST endpoint; PostgreSQL and Supabase use the native Postgres wire protocol; SQLite and DuckDB open their file directly on disk.
 - For PostgreSQL and Supabase the tree's top level lists **databases** on the server, so siblings of the one you opened are browsable too. For SQLite and DuckDB the file itself is the only database, so the tree goes straight to its tables and views.
@@ -70,29 +70,30 @@ Details:
 
 #### SQLite connections
 
-SQLite has no server to point at — the file on disk *is* the database — so the **SQLite** tab is just a **Database file** field, a **Browse…** button, and a **New Database…** button, all backed by VS Code's native file pickers. There's no host, port, user, password, or SSL to configure, and **Test Connection** simply opens the file and reads its `sqlite_version()`.
+SQLite has no server to point at — the file on disk *is* the database — so the **SQLite** tab is just a **Database file** field, **Browse…**/**New Database…** buttons backed by VS Code's native file pickers, and an install banner. There's no host, port, user, password, or SSL to configure.
+
+Neither SQLite's nor DuckDB's engine is bundled with the extension — both are native modules, downloaded on demand the first time you open their tab, rather than shipped in every install whether or not anyone uses them:
+1. If the engine isn't downloaded yet, the tab shows a banner — click **Install**. This runs `npm install` in the background, into the extension's own storage (not your project), not the extension's `.vsix`. For SQLite that's a one-time **~2MB** download.
+2. Once installed, it stays installed for every connection of that engine afterward.
+3. **Test Connection** and **Save & Connect** work as soon as the banner reports **SQLite is installed and ready.**
 
 Details:
+- Requires `npm` on your `PATH` (bundled with any Node.js install) — if the install fails immediately, that's the most likely reason.
 - **Browse…** points at a `.db`/`.sqlite` file that already exists; **New Database…** opens a native Save dialog and creates an empty file wherever you choose, ready to connect to immediately.
 - The connection stores an absolute path; moving or renaming the file breaks it the same way a renamed folder would in any other tool — edit the connection and browse to the new location.
 - The tree's top level goes straight to **Tables/Views**, skipping the database picker that Postgres/Supabase show, since one file only ever has one database.
 - Table DDL is the table's own literal `CREATE TABLE`/`CREATE VIEW` statement, exactly as SQLite stored it — not reassembled from catalog metadata like PostgreSQL's is.
-- Runs through [`better-sqlite3`](https://github.com/WiseLibs/better-sqlite3), a native module shipped with prebuilt binaries for macOS, Windows, and Linux (x64 and arm64) so nothing needs compiling on install.
+- Runs through [`better-sqlite3`](https://github.com/WiseLibs/better-sqlite3).
 
 #### DuckDB connections
 
-The **DuckDB** tab looks like SQLite's — **Database file**, **Browse…**, **New Database…**, nothing else — but DuckDB's engine is not bundled with the extension, because it is dramatically bigger than SQLite's (its native module runs 40–120MB *per platform*, versus ~2MB for SQLite's). Bundling it for every install, whether or not anyone uses DuckDB, wasn't worth the weight.
+The **DuckDB** tab looks and works like SQLite's — same **Database file**/**Browse…**/**New Database…**/install-banner shape — just a much bigger download: DuckDB's native module runs **40–120MB per platform**, versus ~2MB for SQLite's, since it's a full analytical engine (its own SQL parser, vectorized execution, Parquet/CSV readers) rather than SQLite's minimalist row store. That size difference is exactly why neither engine is bundled — see [SQLite connections](#sqlite-connections) for the shared install flow.
 
-Instead, the tab shows an install banner the first time you open it:
-1. If DuckDB isn't downloaded yet, click **Install**. This runs `npm install @duckdb/node-api` in the background, into the extension's own storage (not your project) — a one-time ~100MB download.
-2. Once installed, it stays installed for every DuckDB connection afterward — no re-downloading per connection, and no effect on the extension's own package size, since the download happens after install, not as part of it.
-3. **Test Connection** and **Save & Connect** work as soon as the banner reports **DuckDB is installed and ready.**
-
-Details:
-- Requires `npm` on your `PATH` (bundled with any Node.js install) — if the install fails immediately, that's the most likely reason.
+Details beyond what SQLite's section covers:
 - Unlike SQLite, DuckDB auto-creates a file the first time anything opens it, so **New Database…** is a convenience rather than a strict requirement — pointing **Browse…** at a not-yet-existing path would also work, though the native file picker only ever lists files that already exist.
 - Table DDL comes from DuckDB's own `duckdb_tables()`/`duckdb_views()` — the literal `CREATE` statement, like SQLite, not reassembled metadata like PostgreSQL's.
 - Schema introspection uses DuckDB's Postgres-compatible `information_schema`, so column types and nullability read the same way they would against a Postgres connection.
+- Runs through [`@duckdb/node-api`](https://www.npmjs.com/package/@duckdb/node-api).
 
 #### Importing CSV data
 

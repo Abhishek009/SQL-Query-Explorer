@@ -3,7 +3,7 @@
   "displayName": "SQL Query Explorer",
   "publisher": "big-tech-talk",
   "description": "Browse schemas and run SQL from VS Code. Supports Trino, PostgreSQL, Supabase, SQLite, and DuckDB.",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -481,7 +481,7 @@
     ]
   },
   "scripts": {
-    "vscode:prepublish": "npm run bundle -- --production && node scripts/trim-better-sqlite3.mjs",
+    "vscode:prepublish": "npm run bundle -- --production",
     "bundle": "node esbuild.mjs",
     "compile": "tsc -p ./",
     "watch": "node esbuild.mjs --watch",
@@ -489,7 +489,6 @@
     "test:watch": "vitest"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^20.10.0",
     "@types/pg": "^8.20.4",
     "@types/vscode": "^1.85.0",
@@ -500,7 +499,6 @@
     "vitest": "^4.1.10"
   },
   "dependencies": {
-    "better-sqlite3": "^13.0.3",
     "pg": "^8.22.0"
   }
 }

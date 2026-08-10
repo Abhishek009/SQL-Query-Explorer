@@ -5,11 +5,17 @@ import type { ConnectionFormData } from '../../connectionForm';
  * SQLite's field set is nothing like the others': there is no host, port,
  * user, password, or SSL — just a file on disk. Browse opens a native picker
  * through the extension host, since a webview cannot touch the filesystem.
+ * The native module itself is downloaded on demand rather than bundled, so
+ * the tab leads with an install banner the same way DuckDB's does.
  */
 export function sqliteFieldsHtml(values: ConnectionFormData): string {
     const advancedOpen = values.maxRows ? ' open' : '';
     return `
     <section class="card compact">
+      <div id="sqlite-install-banner" class="install-banner">
+        <span id="sqlite-install-text">Checking whether SQLite is installed…</span>
+        <button type="button" id="sqlite-install-button" class="secondary" hidden>Install</button>
+      </div>
       <div class="field">
         <label class="lbl" for="l-name">Connection name</label>
         <input id="l-name" value="${escapeHtml(values.name)}" placeholder="Local database">

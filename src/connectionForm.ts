@@ -46,14 +46,14 @@ export function isCreateFileMessage(value: unknown): value is { type: 'createFil
     return typeof value === 'object' && value !== null && (value as { type?: unknown }).type === 'createFile';
 }
 
-/** The DuckDB tab asking whether its native module is already downloaded. */
-export function isCheckDuckdbMessage(value: unknown): value is { type: 'checkDuckdb' } {
-    return typeof value === 'object' && value !== null && (value as { type?: unknown }).type === 'checkDuckdb';
+/** The SQLite/DuckDB tab asking whether its native module is already downloaded. */
+export function isCheckRuntimeMessage(value: unknown): value is { type: 'checkRuntime'; engine: FileEngine } {
+    return typeof value === 'object' && value !== null && (value as { type?: unknown }).type === 'checkRuntime';
 }
 
-/** The DuckDB tab's Install button. */
-export function isInstallDuckdbMessage(value: unknown): value is { type: 'installDuckdb' } {
-    return typeof value === 'object' && value !== null && (value as { type?: unknown }).type === 'installDuckdb';
+/** The SQLite/DuckDB tab's Install button. */
+export function isInstallRuntimeMessage(value: unknown): value is { type: 'installRuntime'; engine: FileEngine } {
+    return typeof value === 'object' && value !== null && (value as { type?: unknown }).type === 'installRuntime';
 }
 
 /** Blank means "use the global cap", so an empty field stores nothing. */
@@ -272,37 +272,51 @@ byId('l-new').addEventListener('click',()=>{ vscode.postMessage({type:'createFil
 byId('d-browse').addEventListener('click',()=>{ vscode.postMessage({type:'browseFile',engine:'duckdb'}); });
 byId('d-new').addEventListener('click',()=>{ vscode.postMessage({type:'createFile',engine:'duckdb'}); });
 
-const duckdbBanner=byId('duckdb-install-banner'), duckdbText=byId('duckdb-install-text'), duckdbButton=byId('duckdb-install-button');
-function setDuckdbBanner(state,text){
-  duckdbBanner.className='install-banner '+state;
-  duckdbText.textContent=text;
-  duckdbButton.hidden=state!=='missing';
+// SQLite and DuckDB both download their native module on demand rather than
+// bundling it, so both tabs lead with the same install-banner flow — just
+// different element id prefixes, labels, and download sizes.
+const RUNTIME_ENGINES={
+  sqlite:{label:'SQLite',size:'~2MB'},
+  duckdb:{label:'DuckDB',size:'~100MB'}
+};
+const runtimeChecked={};
+function setupRuntimeBanner(runtimeEngine){
+  const info=RUNTIME_ENGINES[runtimeEngine];
+  const banner=byId(runtimeEngine+'-install-banner'), text=byId(runtimeEngine+'-install-text'), button=byId(runtimeEngine+'-install-button');
+  function setBanner(state,message){
+    banner.className='install-banner '+state;
+    text.textContent=message;
+    button.hidden=state!=='missing';
+  }
+  button.addEventListener('click',()=>{
+    setBanner('checking','Installing '+info.label+' (this can take a minute)…');
+    vscode.postMessage({type:'installRuntime',engine:runtimeEngine});
+  });
+  function ensureChecked(){
+    if(runtimeChecked[runtimeEngine]){ return; }
+    runtimeChecked[runtimeEngine]=true;
+    vscode.postMessage({type:'checkRuntime',engine:runtimeEngine});
+  }
+  document.querySelector('.tab[data-engine="'+runtimeEngine+'"]').addEventListener('click', ensureChecked);
+  if(engine===runtimeEngine){ ensureChecked(); }
+  return setBanner;
 }
-duckdbButton.addEventListener('click',()=>{
-  setDuckdbBanner('checking','Installing DuckDB (this can take a minute)…');
-  vscode.postMessage({type:'installDuckdb'});
-});
-let duckdbChecked=false;
-function ensureDuckdbChecked(){
-  if(duckdbChecked){ return; }
-  duckdbChecked=true;
-  vscode.postMessage({type:'checkDuckdb'});
-}
-document.querySelector('.tab[data-engine="duckdb"]').addEventListener('click', ensureDuckdbChecked);
-if(engine==='duckdb'){ ensureDuckdbChecked(); }
+const runtimeBanners={sqlite:setupRuntimeBanner('sqlite'),duckdb:setupRuntimeBanner('duckdb')};
 
 window.addEventListener('message',e=>{
   if(e.data.type==='error'){
     const box=byId('error'); box.textContent=e.data.message; box.classList.add('show'); box.scrollIntoView({block:'nearest'});
   }
-  if(e.data.type==='duckdbInstallStatus'){
-    setDuckdbBanner(e.data.installed?'ready':'missing', e.data.installed?'DuckDB is installed and ready.':'DuckDB is not installed yet (~100MB download).');
+  if(e.data.type==='runtimeStatus'){
+    const info=RUNTIME_ENGINES[e.data.engine];
+    runtimeBanners[e.data.engine](e.data.installed?'ready':'missing',
+      e.data.installed?info.label+' is installed and ready.':info.label+' is not installed yet ('+info.size+' download).');
   }
-  if(e.data.type==='duckdbInstallProgress'){
-    setDuckdbBanner('checking', e.data.message);
+  if(e.data.type==='runtimeInstallProgress'){
+    runtimeBanners[e.data.engine]('checking', e.data.message);
   }
-  if(e.data.type==='duckdbInstallDone'){
-    setDuckdbBanner(e.data.ok?'ready':'error', e.data.message);
+  if(e.data.type==='runtimeInstallDone'){
+    runtimeBanners[e.data.engine](e.data.ok?'ready':'error', e.data.message);
   }
   if(e.data.type==='testResult'){
     const box=byId('result');

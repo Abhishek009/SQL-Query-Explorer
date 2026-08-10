@@ -2,32 +2,33 @@ import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import RawDatabase from 'better-sqlite3';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { SqliteClient } from '../../src/engines/sqlite/sqliteClient';
+import { SqliteClient, createEmptyDatabase } from '../../src/engines/sqlite/sqliteClient';
+import { isSqliteInstalled, setSqliteRuntimeDirForTests } from '../../src/engines/sqlite/sqliteRuntime';
 import { fakeSecrets } from '../setup/support';
 import type { StoredConnection } from '../../src/types';
 
-// SQLite needs no external server — the fixture is a real file created fresh
-// for this run, so these tests always run rather than skipping like the
-// live-server suites for Postgres/Trino.
-describe('SqliteClient (local file)', () => {
+// Skips itself (rather than failing) when better-sqlite3 has not been
+// fetched into the local test cache — see .gitignore/.sqlite-test-cache for
+// how to opt in. No download happens as a side effect of `npm test`.
+const cacheDir = path.resolve(__dirname, '../../.sqlite-test-cache');
+setSqliteRuntimeDirForTests(cacheDir);
+const hasSqliteCache = isSqliteInstalled();
+
+describe.skipIf(!hasSqliteCache)('SqliteClient (local file)', () => {
     const file = path.join(os.tmpdir(), `sqlexplorer-test-${randomUUID()}.db`);
     let connection: StoredConnection;
     let client: SqliteClient;
 
-    beforeAll(() => {
-        const seed = new RawDatabase(file);
-        seed.exec(`
-            CREATE TABLE actor (id INTEGER PRIMARY KEY, name TEXT NOT NULL);
-            CREATE VIEW actor_names AS SELECT name FROM actor;
-        `);
-        const insert = seed.prepare('INSERT INTO actor (name) VALUES (?)');
-        for (let i = 0; i < 10; i++) { insert.run(`Actor ${i}`); }
-        seed.close();
-
+    beforeAll(async () => {
+        createEmptyDatabase(file);
         connection = { id: randomUUID(), name: 'test-sqlite', type: 'sqlite', url: file, user: '' };
         client = new SqliteClient(fakeSecrets() as never, connection);
+        await client.query('CREATE TABLE actor (id INTEGER PRIMARY KEY, name TEXT NOT NULL)');
+        await client.query('CREATE VIEW actor_names AS SELECT name FROM actor');
+        for (let i = 0; i < 10; i++) {
+            await client.query(`INSERT INTO actor (name) VALUES ('Actor ${i}')`);
+        }
     });
 
     afterAll(() => {

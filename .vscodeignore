@@ -17,21 +17,17 @@ esbuild.mjs
 test/**
 .env
 .env.*
-scripts/**
-# The DuckDB integration tests' opt-in local cache — never installed for a
-# real user, only present if a contributor deliberately fetched it to test
-# against a real engine (see test/engines/duckdbClient.test.ts).
+# Opt-in local caches for the SQLite/DuckDB integration tests — never
+# installed for a real user, only present if a contributor deliberately
+# fetched one to test against a real engine (see test/engines/*.test.ts).
+.sqlite-test-cache/**
 .duckdb-test-cache/**
 
 # pg is bundled into dist/extension.js by esbuild, so it needs nothing here.
-# better-sqlite3 is a native addon (a compiled .node binary) that esbuild
-# cannot bundle, so its whole package directory ships as-is instead — vsce
-# does not reliably support re-excluding paths nested under a negated
-# directory, so this also carries its build-only source/headers (~10MB) that
-# nothing at runtime touches. Trimming that requires deleting those files from
-# node_modules before packaging, not a smarter ignore pattern.
+# SQLite and DuckDB are native modules downloaded on demand at runtime
+# instead — see sqliteRuntime.ts/duckdbRuntime.ts — so nothing about them
+# ships in the package at all.
 node_modules/**
-!node_modules/better-sqlite3/**
 
 # Build and repo config
 tsconfig.json

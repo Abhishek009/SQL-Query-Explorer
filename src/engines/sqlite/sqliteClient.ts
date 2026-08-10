@@ -1,11 +1,48 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import Database from 'better-sqlite3';
+import { createRequire } from 'module';
 import { StoredConnection, TableEntry, TrinoColumn, TrinoQueryResult, TrinoRequestError } from '../../types';
 import { numberSetting, quoteIdentifier } from '../../util';
 import { SqlClient } from '../../client';
+import { isSqliteInstalled, sqliteModulePath } from './sqliteRuntime';
 
-/** SQLite has no server-side row cap, so every read is capped with LIMIT/slicing here. */
+/**
+ * The slice of better-sqlite3's API this file calls. Hand-written rather than
+ * `@types/better-sqlite3` because the real package is never a project
+ * dependency — installing it (a native module) happens on demand at runtime,
+ * downloaded into the user's machine only if they add a SQLite connection —
+ * so there is nothing on disk for the compiler to read real types from.
+ * Verified by hand against the installed package's own .d.ts; keep in sync if
+ * better-sqlite3 changes this API.
+ */
+interface SqliteRunResult {
+    changes: number;
+}
+interface SqliteStatement {
+    readonly reader: boolean;
+    pluck(toggleState?: boolean): SqliteStatement;
+    get(...params: unknown[]): unknown;
+    all(...params: unknown[]): unknown[];
+    run(...params: unknown[]): SqliteRunResult;
+    iterate(...params: unknown[]): IterableIterator<Record<string, unknown>>;
+}
+interface SqliteDatabase {
+    prepare(sql: string): SqliteStatement;
+    pragma(sql: string): unknown;
+    close(): void;
+}
+type SqliteDatabaseCtor = new (path: string, options?: { fileMustExist?: boolean }) => SqliteDatabase;
+
+function loadSqliteApi(): SqliteDatabaseCtor {
+    if (!isSqliteInstalled()) {
+        throw new Error('SQLite is not installed yet. Edit this connection and click Install.');
+    }
+    // A dynamic require from a computed path, not a literal module specifier,
+    // so esbuild leaves it alone rather than trying to bundle a package that
+    // is never part of this project's own node_modules.
+    const runtimeRequire = createRequire(path.join(sqliteModulePath(), 'package.json'));
+    return runtimeRequire('better-sqlite3') as SqliteDatabaseCtor;
+}
 
 /**
  * SQLite, opened directly from a local file. There is no server and no
@@ -16,7 +53,7 @@ import { SqlClient } from '../../client';
  */
 export class SqliteClient implements SqlClient {
     /** One handle per connection id: better-sqlite3 is synchronous and safe to reuse. */
-    private static readonly handles = new Map<string, Database.Database>();
+    private static readonly handles = new Map<string, SqliteDatabase>();
 
     public constructor(
         _secrets: vscode.SecretStorage,
@@ -123,7 +160,7 @@ export class SqliteClient implements SqlClient {
             }
             const rows: unknown[][] = [];
             let columns: string[] | undefined;
-            for (const row of statement.iterate() as IterableIterator<Record<string, unknown>>) {
+            for (const row of statement.iterate()) {
                 columns ??= Object.keys(row);
                 if (rows.length >= limit) { return { columns, rows, truncated: true, maxRows: limit }; }
                 rows.push(Object.values(row));
@@ -134,10 +171,11 @@ export class SqliteClient implements SqlClient {
         }
     }
 
-    private open(): Database.Database {
+    private open(): SqliteDatabase {
         const existing = SqliteClient.handles.get(this.connection.id);
         if (existing) { return existing; }
         if (!this.connection.url) { throw new Error('Choose a SQLite database file before connecting.'); }
+        const Database = loadSqliteApi();
         const db = new Database(this.connection.url, { fileMustExist: true });
         db.pragma('journal_mode = WAL');
         SqliteClient.handles.set(this.connection.id, db);
@@ -156,5 +194,6 @@ export class SqliteClient implements SqlClient {
 
 /** Creates a fresh, empty SQLite file at `file`, for the New Database button. */
 export function createEmptyDatabase(file: string): void {
+    const Database = loadSqliteApi();
     new Database(file).close();
 }

@@ -9,8 +9,9 @@ import { ResultsSurface, ResultsTabs } from './resultsView';
 import { QueryStatusProvider } from './queryStatus';
 import { QueryScope } from './queryScope';
 import { RunningQueryRegistry } from './runningQueries';
-import { ConnectionMessage, connectionFormHtml, isBrowseFileMessage, isCheckDuckdbMessage, isConnectionMessage, isCreateFileMessage, isInstallDuckdbMessage, parseMaxRows, validateConnection } from './connectionForm';
+import { ConnectionMessage, connectionFormHtml, isBrowseFileMessage, isCheckRuntimeMessage, isConnectionMessage, isCreateFileMessage, isInstallRuntimeMessage, parseMaxRows, validateConnection } from './connectionForm';
 import { createEmptyDatabase } from './engines/sqlite/sqliteClient';
+import { isSqliteInstalled, installSqlite } from './engines/sqlite/sqliteRuntime';
 import { createEmptyDuckdb } from './engines/duckdb/duckdbClient';
 import { installDuckdb, isDuckdbInstalled } from './engines/duckdb/duckdbRuntime';
 import { addressesByDatabase, closeAllClients, engineOf, ENGINE_LABELS } from './client';
@@ -482,19 +483,22 @@ export async function showConnectionWindow(
             }
             return;
         }
-        if (isCheckDuckdbMessage(message)) {
-            void panel.webview.postMessage({ type: 'duckdbInstallStatus', installed: isDuckdbInstalled() });
+        if (isCheckRuntimeMessage(message)) {
+            const installed = message.engine === 'sqlite' ? isSqliteInstalled() : isDuckdbInstalled();
+            void panel.webview.postMessage({ type: 'runtimeStatus', engine: message.engine, installed });
             return;
         }
-        if (isInstallDuckdbMessage(message)) {
+        if (isInstallRuntimeMessage(message)) {
+            const label = message.engine === 'sqlite' ? 'SQLite' : 'DuckDB';
+            const install = message.engine === 'sqlite' ? installSqlite : installDuckdb;
             try {
-                await installDuckdb(line => {
-                    void panel.webview.postMessage({ type: 'duckdbInstallProgress', message: line.trim().split('\n').pop() || 'Installing…' });
+                await install(line => {
+                    void panel.webview.postMessage({ type: 'runtimeInstallProgress', engine: message.engine, message: line.trim().split('\n').pop() || 'Installing…' });
                 });
-                void panel.webview.postMessage({ type: 'duckdbInstallDone', ok: true, message: 'DuckDB is installed and ready.' });
+                void panel.webview.postMessage({ type: 'runtimeInstallDone', engine: message.engine, ok: true, message: `${label} is installed and ready.` });
             } catch (error) {
                 const text = error instanceof Error ? error.message : String(error);
-                void panel.webview.postMessage({ type: 'duckdbInstallDone', ok: false, message: `Install failed: ${summarize(text)}` });
+                void panel.webview.postMessage({ type: 'runtimeInstallDone', engine: message.engine, ok: false, message: `Install failed: ${summarize(text)}` });
             }
             return;
         }

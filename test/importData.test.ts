@@ -2,14 +2,18 @@ import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import RawDatabase from 'better-sqlite3';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { cellLiteral } from '../src/importData';
 import { parseCsv } from '../src/csv';
 import { quoteIdentifier } from '../src/util';
-import { SqliteClient } from '../src/engines/sqlite/sqliteClient';
+import { SqliteClient, createEmptyDatabase } from '../src/engines/sqlite/sqliteClient';
+import { isSqliteInstalled, setSqliteRuntimeDirForTests } from '../src/engines/sqlite/sqliteRuntime';
 import { fakeSecrets } from './setup/support';
 import type { StoredConnection } from '../src/types';
+
+const cacheDir = path.resolve(__dirname, '../.sqlite-test-cache');
+setSqliteRuntimeDirForTests(cacheDir);
+const hasSqliteCache = isSqliteInstalled();
 
 describe('cellLiteral', () => {
     it('passes a valid number through unquoted for a numeric column', () => {
@@ -31,17 +35,16 @@ describe('cellLiteral', () => {
     });
 });
 
-describe('import pipeline (real SQLite file)', () => {
+describe.skipIf(!hasSqliteCache)('import pipeline (real SQLite file)', () => {
     const file = path.join(os.tmpdir(), `sqlexplorer-import-${randomUUID()}.db`);
     let client: SqliteClient;
     let connection: StoredConnection;
 
-    beforeAll(() => {
-        const seed = new RawDatabase(file);
-        seed.exec('CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT NOT NULL, balance REAL)');
-        seed.close();
+    beforeAll(async () => {
+        createEmptyDatabase(file);
         connection = { id: randomUUID(), name: 'test-import', type: 'sqlite', url: file, user: '' };
         client = new SqliteClient(fakeSecrets() as never, connection);
+        await client.query('CREATE TABLE customers (id INTEGER PRIMARY KEY, name TEXT NOT NULL, balance REAL)');
     });
 
     afterAll(() => {
