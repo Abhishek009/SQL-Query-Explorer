@@ -89,7 +89,8 @@ export function describeFetchFailure(error: unknown, url: string): Error {
         DEPTH_ZERO_SELF_SIGNED_CERT: `${target} uses a self-signed certificate that Node does not trust. Point NODE_EXTRA_CA_CERTS at your CA bundle.`,
         SELF_SIGNED_CERT_IN_CHAIN: `${target} presents a certificate chain Node does not trust, which is common behind a corporate proxy. Point NODE_EXTRA_CA_CERTS at your CA bundle.`,
         UNABLE_TO_VERIFY_LEAF_SIGNATURE: `the certificate from ${target} could not be verified. Point NODE_EXTRA_CA_CERTS at your CA bundle.`,
-        CERT_HAS_EXPIRED: `the certificate for ${target} has expired.`
+        CERT_HAS_EXPIRED: `the certificate for ${target} has expired.`,
+        ERR_TLS_CERT_ALTNAME_INVALID: `${target}'s certificate does not cover that hostname — likely a load balancer/proxy presenting the wrong certificate. If you know this server and its certificate mismatch, turn off "Verify server certificate" in Advanced; otherwise this is a server-side TLS misconfiguration.`
     };
     const explanation = explanations[code] ?? `${cause?.message ?? (error instanceof Error ? error.message : String(error))}.`;
     const detail = [code, cause?.message].filter(Boolean).join(': ');

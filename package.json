@@ -196,6 +196,11 @@
               "ssl": {
                 "type": "boolean",
                 "description": "PostgreSQL/Supabase only: use TLS to reach the server."
+              },
+              "sslVerify": {
+                "type": "boolean",
+                "default": true,
+                "description": "Trino only: verify the server's TLS certificate. Turning this off trusts any certificate the server presents — only for a server with a known certificate mismatch."
               }
             }
           }
@@ -499,6 +504,7 @@
     "vitest": "^4.1.10"
   },
   "dependencies": {
-    "pg": "^8.22.0"
+    "pg": "^8.22.0",
+    "undici": "^8.10.0"
   }
 }

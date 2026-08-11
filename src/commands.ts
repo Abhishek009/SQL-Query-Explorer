@@ -379,6 +379,8 @@ export function connectionFromForm(request: ConnectionMessage, id: string): Stor
         catalog: wireProtocol ? (request.database.trim() || 'postgres') : (request.catalog.trim() || undefined),
         schema: wireProtocol ? undefined : (request.schema.trim() || undefined),
         ssl: wireProtocol ? request.sslEnabled : undefined,
+        // Trino only: whether HTTPS requests verify the server's certificate.
+        sslVerify: wireProtocol ? undefined : request.sslVerify,
         maxRows: parseMaxRows(request.maxRows)
     };
 }
@@ -442,6 +444,7 @@ export async function showConnectionWindow(
         host: current.host,
         port: current.port ? String(current.port) : '',
         sslEnabled: current.sslEnabled,
+        sslVerify: existing?.sslVerify ?? true,
         user: existing?.user ?? '',
         catalog: wireProtocol ? '' : (existing?.catalog ?? ''),
         schema: existing?.schema ?? '',

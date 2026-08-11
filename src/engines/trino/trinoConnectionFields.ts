@@ -60,5 +60,11 @@ export function trinoFieldsHtml(values: ConnectionFormData, passwordHint: string
         <label class="lbl" for="t-maxRows">Maximum rows to fetch</label>
         <input id="t-maxRows" type="number" min="1" max="1000000" value="${escapeHtml(values.maxRows)}" placeholder="Leave blank to use the global setting">
       </div>
+      <label class="switch small">
+        <input id="t-sslVerify" type="checkbox" ${values.sslVerify ? 'checked' : ''}>
+        <span class="track"></span>
+        <span class="switch-label">Verify server certificate</span>
+      </label>
+      <p class="hint">Only applies over SSL. Turn off only for a server with a known certificate mismatch (e.g. an internal load balancer presenting the wrong hostname) — this trusts <em>any</em> certificate the server presents, so leave it on unless you have a specific reason not to.</p>
     </details>`;
 }

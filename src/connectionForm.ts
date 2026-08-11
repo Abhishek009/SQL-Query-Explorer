@@ -11,6 +11,8 @@ export interface ConnectionFormData {
     host: string;
     port: string;
     sslEnabled: boolean;
+    /** Trino only: whether to verify the server's TLS certificate. */
+    sslVerify: boolean;
     user: string;
     catalog: string;
     schema: string;
@@ -74,7 +76,7 @@ export function validateConnection(value: ConnectionMessage): string | undefined
 }
 
 const BLANK: ConnectionFormData = {
-    name: '', engine: 'trino', host: '', port: '', sslEnabled: false,
+    name: '', engine: 'trino', host: '', port: '', sslEnabled: false, sslVerify: true,
     user: '', catalog: '', schema: '', database: '', file: '', maxRows: ''
 };
 
@@ -225,7 +227,7 @@ document.querySelectorAll('.tab').forEach(tab=>tab.addEventListener('click',()=>
 function trinoPayload(kind){
   const port=byId('t-port');
   return {type:kind,engine:'trino',name:byId('t-name').value,host:byId('t-host').value,
-    port:port.value.trim()||port.placeholder,sslEnabled:byId('t-ssl').checked,user:byId('t-user').value,
+    port:port.value.trim()||port.placeholder,sslEnabled:byId('t-ssl').checked,sslVerify:byId('t-sslVerify').checked,user:byId('t-user').value,
     password:byId('t-password').value,clearPassword:byId('t-clearPassword').checked,
     catalog:byId('t-catalog').value,schema:byId('t-schema').value,database:'',
     maxRows:byId('t-maxRows').value,connect};
@@ -233,7 +235,7 @@ function trinoPayload(kind){
 function postgresPayload(kind){
   const port=byId('p-port');
   return {type:kind,engine:'postgres',name:byId('p-name').value,host:byId('p-host').value,
-    port:port.value.trim()||port.placeholder,sslEnabled:byId('p-ssl').checked,user:byId('p-user').value,
+    port:port.value.trim()||port.placeholder,sslEnabled:byId('p-ssl').checked,sslVerify:true,user:byId('p-user').value,
     password:byId('p-password').value,clearPassword:byId('p-clearPassword').checked,
     catalog:'',schema:'',database:byId('p-database').value,
     maxRows:byId('p-maxRows').value,connect};
@@ -241,18 +243,18 @@ function postgresPayload(kind){
 function supabasePayload(kind){
   const port=byId('s-port'), user=byId('s-user');
   return {type:kind,engine:'supabase',name:byId('s-name').value,host:byId('s-host').value,
-    port:port.value.trim()||port.placeholder,sslEnabled:byId('s-ssl').checked,user:user.value.trim()||user.placeholder,
+    port:port.value.trim()||port.placeholder,sslEnabled:byId('s-ssl').checked,sslVerify:true,user:user.value.trim()||user.placeholder,
     password:byId('s-password').value,clearPassword:byId('s-clearPassword').checked,
     catalog:'',schema:'',database:byId('s-database').value,
     maxRows:byId('s-maxRows').value,connect};
 }
 function sqlitePayload(kind){
-  return {type:kind,engine:'sqlite',name:byId('l-name').value,host:'',port:'',sslEnabled:false,user:'',
+  return {type:kind,engine:'sqlite',name:byId('l-name').value,host:'',port:'',sslEnabled:false,sslVerify:true,user:'',
     password:'',clearPassword:false,catalog:'',schema:'',database:'',file:byId('l-file').value,
     maxRows:byId('l-maxRows').value,connect};
 }
 function duckdbPayload(kind){
-  return {type:kind,engine:'duckdb',name:byId('d-name').value,host:'',port:'',sslEnabled:false,user:'',
+  return {type:kind,engine:'duckdb',name:byId('d-name').value,host:'',port:'',sslEnabled:false,sslVerify:true,user:'',
     password:'',clearPassword:false,catalog:'',schema:'',database:'',file:byId('d-file').value,
     maxRows:byId('d-maxRows').value,connect};
 }

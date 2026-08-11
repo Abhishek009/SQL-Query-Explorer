@@ -11,6 +11,9 @@ export interface StoredConnection {
     schema?: string;
     /** Postgres/Supabase only: TLS to the server. Trino carries this in its URL scheme. */
     ssl?: boolean;
+    /** Trino/HTTPS only: verify the server's TLS certificate. Defaults true; turning
+     *  it off trusts any certificate, for a known-mismatched internal LB/proxy cert. */
+    sslVerify?: boolean;
     /** Optional per-connection override of `trino.query.maxRows`. */
     maxRows?: number;
 }

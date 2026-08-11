@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { Agent } from 'undici';
 import { StoredConnection, TableEntry, TrinoColumn, TrinoQueryResult, TrinoRequestError } from '../../types';
 import { passwordKey } from '../../connectionStore';
 import { describeFetchFailure, firstColumn, numberSetting, quoteIdentifier, quoteLiteral, summarize } from '../../util';
@@ -33,6 +34,9 @@ export interface TrinoPage {
 }
 
 export class TrinoClient implements SqlClient {
+    /** Built once and reused: a fresh Agent per request would defeat connection pooling. */
+    private insecureAgent?: Agent;
+
     public constructor(
         private readonly secrets: vscode.SecretStorage,
         private readonly connection: StoredConnection,
@@ -225,18 +229,32 @@ export class TrinoClient implements SqlClient {
      */
     private async cancelQuery(nextUri: string, headers: Record<string, string>): Promise<boolean> {
         try {
-            const response = await fetch(nextUri, { method: 'DELETE', headers });
+            const response = await fetch(nextUri, { method: 'DELETE', headers, dispatcher: this.dispatcher() } as RequestInit);
             return response.ok || response.status === 404; // 404 = already gone
         } catch {
             return false;
         }
     }
 
+    /**
+     * A per-connection dispatcher that skips certificate verification, only
+     * built when the connection has explicitly opted out of it (unchecking
+     * "Verify server certificate") — trusts any certificate the server
+     * presents, so this must never be the default.
+     */
+    private dispatcher(): Agent | undefined {
+        if (this.connection.sslVerify === false) {
+            this.insecureAgent ??= new Agent({ connect: { rejectUnauthorized: false } });
+            return this.insecureAgent;
+        }
+        return undefined;
+    }
+
     private async request(url: string, init: { method: string; headers: Record<string, string>; body?: string; signal?: vscode.CancellationToken; abort?: AbortController }): Promise<Response> {
         const controller = init.abort ?? new AbortController();
         const cancellation = init.signal?.onCancellationRequested(() => controller.abort());
         try {
-            return await fetch(url, { method: init.method, headers: init.headers, body: init.body, signal: controller.signal });
+            return await fetch(url, { method: init.method, headers: init.headers, body: init.body, signal: controller.signal, dispatcher: this.dispatcher() } as RequestInit);
         } catch (error) {
             if (controller.signal.aborted) { throw new Error('Trino query was cancelled.'); }
             throw describeFetchFailure(error, url);
