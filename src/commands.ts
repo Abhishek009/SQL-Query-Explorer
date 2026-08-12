@@ -349,7 +349,7 @@ export async function showSqlResults(
 export function connectionFromForm(request: ConnectionMessage, id: string): StoredConnection {
     const defaultName = {
         trino: 'Trino Connection', postgres: 'PostgreSQL Connection', supabase: 'Supabase Connection',
-        sqlite: 'SQLite Database', duckdb: 'DuckDB Database'
+        sqlite: 'SQLite Database', duckdb: 'DuckDB Database', mysql: 'MySQL Connection'
     }[request.engine];
     if (request.engine === 'sqlite' || request.engine === 'duckdb') {
         const file = request.file.trim();
@@ -368,15 +368,21 @@ export function connectionFromForm(request: ConnectionMessage, id: string): Stor
     }
     const host = formatHost(request.host.trim());
     const port = request.port.trim();
+    const isMysql = request.engine === 'mysql';
     const wireProtocol = addressesByDatabase(request.engine);
     return {
         id,
         name: request.name.trim() || defaultName,
         type: request.engine,
         // Postgres/Supabase keep their database in `catalog`, which is also the tree's top level.
-        url: wireProtocol ? `postgresql://${host}:${port}` : `${request.sslEnabled ? 'https' : 'http'}://${host}:${port}`,
+        url: wireProtocol ? `${isMysql ? 'mysql' : 'postgresql'}://${host}:${port}` : `${request.sslEnabled ? 'https' : 'http'}://${host}:${port}`,
         user: request.user.trim(),
-        catalog: wireProtocol ? (request.database.trim() || 'postgres') : (request.catalog.trim() || undefined),
+        // MySQL can browse every database on the server without picking one first,
+        // unlike Postgres where a connection is always open against exactly one —
+        // so an empty field means "all of them" instead of falling back to a default.
+        catalog: wireProtocol
+            ? (isMysql ? (request.database.trim() || undefined) : (request.database.trim() || 'postgres'))
+            : (request.catalog.trim() || undefined),
         schema: wireProtocol ? undefined : (request.schema.trim() || undefined),
         ssl: wireProtocol ? request.sslEnabled : undefined,
         // Trino only: whether HTTPS requests verify the server's certificate.

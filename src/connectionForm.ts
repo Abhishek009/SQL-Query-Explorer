@@ -4,10 +4,11 @@ import { postgresFieldsHtml } from './engines/postgres/postgresConnectionFields'
 import { supabaseFieldsHtml } from './engines/supabase/supabaseConnectionFields';
 import { sqliteFieldsHtml } from './engines/sqlite/sqliteConnectionFields';
 import { duckdbFieldsHtml } from './engines/duckdb/duckdbConnectionFields';
+import { mysqlFieldsHtml } from './engines/mysql/mysqlConnectionFields';
 
 export interface ConnectionFormData {
     name: string;
-    engine: 'trino' | 'postgres' | 'supabase' | 'sqlite' | 'duckdb';
+    engine: 'trino' | 'postgres' | 'supabase' | 'sqlite' | 'duckdb' | 'mysql';
     host: string;
     port: string;
     sslEnabled: boolean;
@@ -90,6 +91,7 @@ export function connectionFormHtml(webview: vscode.Webview, values: ConnectionFo
     const supabaseValues = values.engine === 'supabase' ? values : { ...BLANK, engine: 'supabase' as const };
     const sqliteValues = values.engine === 'sqlite' ? values : { ...BLANK, engine: 'sqlite' as const };
     const duckdbValues = values.engine === 'duckdb' ? values : { ...BLANK, engine: 'duckdb' as const };
+    const mysqlValues = values.engine === 'mysql' ? values : { ...BLANK, engine: 'mysql' as const };
 
     const styles = `
 :root{--gap:12px;--radius:6px}
@@ -165,7 +167,8 @@ button:focus-visible{outline:2px solid var(--vscode-focusBorder,#2f7ce0);outline
     const isSupabase = values.engine === 'supabase';
     const isSqlite = values.engine === 'sqlite';
     const isDuckdb = values.engine === 'duckdb';
-    const isTrino = !isPostgres && !isSupabase && !isSqlite && !isDuckdb;
+    const isMysql = values.engine === 'mysql';
+    const isTrino = !isPostgres && !isSupabase && !isSqlite && !isDuckdb && !isMysql;
     const tab = (active: boolean) => active ? ' active' : '';
     const selected = (active: boolean) => active ? 'true' : 'false';
 
@@ -185,6 +188,7 @@ button:focus-visible{outline:2px solid var(--vscode-focusBorder,#2f7ce0);outline
     <button type="button" class="tab${tab(isSupabase)}" data-pane="supabase" data-engine="supabase" role="tab" aria-selected="${selected(isSupabase)}"><span class="tab-icon" style="background:#3ecf8e">⚡</span>Supabase</button>
     <button type="button" class="tab${tab(isSqlite)}" data-pane="sqlite" data-engine="sqlite" role="tab" aria-selected="${selected(isSqlite)}"><span class="tab-icon" style="background:#003b57">L</span>SQLite</button>
     <button type="button" class="tab${tab(isDuckdb)}" data-pane="duckdb" data-engine="duckdb" role="tab" aria-selected="${selected(isDuckdb)}"><span class="tab-icon" style="background:#fff000;color:#000">D</span>DuckDB</button>
+    <button type="button" class="tab${tab(isMysql)}" data-pane="mysql" data-engine="mysql" role="tab" aria-selected="${selected(isMysql)}"><span class="tab-icon" style="background:#00758f">M</span>MySQL</button>
   </div>
   <form id="connection">
    <div class="pane${tab(isTrino)}" data-pane="trino">${trinoFieldsHtml(trinoValues, passwordHint, hasPassword)}
@@ -196,6 +200,8 @@ button:focus-visible{outline:2px solid var(--vscode-focusBorder,#2f7ce0);outline
    <div class="pane${tab(isSqlite)}" data-pane="sqlite">${sqliteFieldsHtml(sqliteValues)}
    </div>
    <div class="pane${tab(isDuckdb)}" data-pane="duckdb">${duckdbFieldsHtml(duckdbValues)}
+   </div>
+   <div class="pane${tab(isMysql)}" data-pane="mysql">${mysqlFieldsHtml(mysqlValues, passwordHint, hasPassword)}
    </div>
    <div id="result" class="result" role="status"></div>
   </form>
@@ -258,7 +264,15 @@ function duckdbPayload(kind){
     password:'',clearPassword:false,catalog:'',schema:'',database:'',file:byId('d-file').value,
     maxRows:byId('d-maxRows').value,connect};
 }
-const payloadByEngine={postgres:postgresPayload,supabase:supabasePayload,sqlite:sqlitePayload,duckdb:duckdbPayload,trino:trinoPayload};
+function mysqlPayload(kind){
+  const port=byId('m-port');
+  return {type:kind,engine:'mysql',name:byId('m-name').value,host:byId('m-host').value,
+    port:port.value.trim()||port.placeholder,sslEnabled:byId('m-ssl').checked,sslVerify:true,user:byId('m-user').value,
+    password:byId('m-password').value,clearPassword:byId('m-clearPassword').checked,
+    catalog:'',schema:'',database:byId('m-database').value,
+    maxRows:byId('m-maxRows').value,connect};
+}
+const payloadByEngine={postgres:postgresPayload,supabase:supabasePayload,sqlite:sqlitePayload,duckdb:duckdbPayload,mysql:mysqlPayload,trino:trinoPayload};
 function payload(kind){ return payloadByEngine[engine](kind); }
 
 document.querySelectorAll('button[type=submit]').forEach(b=>b.addEventListener('click',()=>{connect=b.dataset.connect==='true';}));
@@ -330,7 +344,7 @@ window.addEventListener('message',e=>{
     byId(e.data.engine==='duckdb'?'d-file':'l-file').value=e.data.path;
   }
 });
-const focusIds={trino:'t-host',postgres:'p-host',supabase:'s-host',sqlite:'l-file',duckdb:'d-file'};
+const focusIds={trino:'t-host',postgres:'p-host',supabase:'s-host',sqlite:'l-file',duckdb:'d-file',mysql:'m-host'};
 byId(focusIds[engine]).focus();`;
 
     return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Trino Connection</title><style>${styles}</style></head><body>${body}<script nonce="${nonce}">${script}</script></body></html>`;

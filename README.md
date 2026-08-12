@@ -2,7 +2,7 @@
 
 A VS Code extension for browsing database schemas and running SQL without leaving the editor.
 
-Supports **[Trino](https://trino.io)**, **[PostgreSQL](https://www.postgresql.org)**, **[Supabase](https://supabase.com)**, **[SQLite](https://www.sqlite.org)**, and **[DuckDB](https://duckdb.org)**. The explorer, results grid, and editor features are shared by all of them, so further engines slot in behind the same interface.
+Supports **[Trino](https://trino.io)**, **[PostgreSQL](https://www.postgresql.org)**, **[Supabase](https://supabase.com)**, **[SQLite](https://www.sqlite.org)**, **[DuckDB](https://duckdb.org)**, and **[MySQL](https://www.mysql.com)**. The explorer, results grid, and editor features are shared by all of them, so further engines slot in behind the same interface.
 
 ### Database support
 
@@ -13,13 +13,13 @@ Supports **[Trino](https://trino.io)**, **[PostgreSQL](https://www.postgresql.or
 | [Supabase](https://supabase.com) | Supported |
 | [SQLite](https://www.sqlite.org) | Supported |
 | [DuckDB](https://duckdb.org) | Supported |
-| [MySQL](https://www.mysql.com) | Not yet supported |
+| [MySQL](https://www.mysql.com) | Supported |
 | [Snowflake](https://www.snowflake.com) | Not yet supported |
 
 ## Features
 
 ### Connections
-- **Pick the engine when adding a connection** — Trino, PostgreSQL, Supabase, SQLite, or DuckDB — and the form shows only the fields that engine needs.
+- **Pick the engine when adding a connection** — Trino, PostgreSQL, Supabase, SQLite, DuckDB, or MySQL — and the form shows only the fields that engine needs.
 - **Test Connection** runs a real query against the details you typed, before saving anything.
 - **Manage several servers at once** — dev, staging, and production sit side by side in the **Connections** view. Add one with the **+** button, then edit, remove, or refresh each from its context menu.
 - One connection is **active** for queries at a time; right-click → **Use Connection for Queries** to switch.
@@ -28,9 +28,10 @@ Supports **[Trino](https://trino.io)**, **[PostgreSQL](https://www.postgresql.or
 - **Supabase** gets its own tab in **Connect To DB**. Paste the project's **Connection string** (from Project Settings → Database) or just its project ref into the Host field and the host, port, user, and database fill themselves in — see [Supabase connections](#supabase-connections).
 - **SQLite** gets its own tab too, with nothing but a **Database file** field, native **Browse…**/**New Database…** pickers, and a one-time **Install** step — no host, port, user, password, or SSL, since it's a local file rather than a server. See [SQLite connections](#sqlite-connections).
 - **DuckDB** gets a tab with the same local-file shape and install step as SQLite — see [DuckDB connections](#duckdb-connections).
+- **MySQL** gets its own tab too — host/port/user/password/database/SSL, the same shape as PostgreSQL's. See [MySQL connections](#mysql-connections).
 - Passwords are stored in **VS Code Secret Storage**, never in `settings.json`.
-- Trino traffic goes through the `/v1/statement` REST endpoint; PostgreSQL and Supabase use the native Postgres wire protocol; SQLite and DuckDB open their file directly on disk.
-- For PostgreSQL and Supabase the tree's top level lists **databases** on the server, so siblings of the one you opened are browsable too. For SQLite and DuckDB the file itself is the only database, so the tree goes straight to its tables and views.
+- Trino traffic goes through the `/v1/statement` REST endpoint; PostgreSQL, Supabase, and MySQL use their native wire protocols; SQLite and DuckDB open their file directly on disk.
+- For PostgreSQL, Supabase, and MySQL the tree's top level lists **databases** on the server, so siblings of the one you opened are browsable too. For SQLite and DuckDB the file itself is the only database, so the tree goes straight to its tables and views.
 
 #### Connection URL formats
 
@@ -95,6 +96,16 @@ Details beyond what SQLite's section covers:
 - Table DDL comes from DuckDB's own `duckdb_tables()`/`duckdb_views()` — the literal `CREATE` statement, like SQLite, not reassembled metadata like PostgreSQL's.
 - Schema introspection uses DuckDB's Postgres-compatible `information_schema`, so column types and nullability read the same way they would against a Postgres connection.
 - Runs through [`@duckdb/node-api`](https://www.npmjs.com/package/@duckdb/node-api).
+
+#### MySQL connections
+
+MySQL's tab looks like PostgreSQL's — host, port, username, password, an optional default database, and an SSL toggle — but unlike Postgres, MySQL doesn't require picking one database up front: leave the **Default database** field blank and the tree lists every database the user can see; fill it in to scope a fresh SQL editor to one by default.
+
+Details:
+- MySQL has no level between a database and its tables the way Postgres has schemas, so the tree's schema level just repeats the database's name rather than introducing a fake concept — `mydb → mydb → Tables/Views` reads a little redundant but keeps the same three-level shape every other engine uses.
+- Table DDL is `SHOW CREATE TABLE`/`SHOW CREATE VIEW`'s literal output, like SQLite and DuckDB, not reassembled from catalog metadata.
+- Runs through [`mysql2`](https://www.npmjs.com/package/mysql2), a pure-JS driver with no native binary — bundled normally, no install-on-demand step like SQLite/DuckDB need.
+- Identifiers are quoted with backticks (MySQL's own convention), not the double quotes every other engine here uses.
 
 #### Importing CSV data
 
