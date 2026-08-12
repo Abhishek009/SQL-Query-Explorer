@@ -121,7 +121,7 @@ export class MySqlClient implements SqlClient {
         sql: string,
         limit: number,
         database?: string,
-        _values?: unknown[],
+        values?: unknown[],
         token?: vscode.CancellationToken
     ): Promise<TrinoQueryResult> {
         const pool = await this.pool(database);
@@ -145,11 +145,15 @@ export class MySqlClient implements SqlClient {
                 const rows: unknown[][] = [];
                 let truncated = false;
 
-                const query = conn.query({ sql, rowsAsArray: true });
-                query.on('fields', (fields: Array<{ name: string }>) => { columns = fields.map(field => field.name); });
+                const query = conn.query({ sql, rowsAsArray: true, values });
+                // mysql2 fires 'fields' for every statement, even a mutation/DDL one —
+                // just with `fields` itself undefined then, not omitted.
+                query.on('fields', (fields: Array<{ name: string }> | undefined) => {
+                    if (fields) { columns = fields.map(field => field.name); }
+                });
                 query.on('result', (row: unknown) => {
                     if (!columns) {
-                        // No 'fields' event before this row: an OkPacket from a mutation/DDL statement.
+                        // No real fields seen yet: an OkPacket from a mutation/DDL statement.
                         const info = row as { affectedRows?: number };
                         const affected = info.affectedRows ?? 0;
                         const command = sql.split(/\s+/)[0].toUpperCase();

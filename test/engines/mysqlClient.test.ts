@@ -3,28 +3,29 @@ import { MySqlClient } from '../../src/engines/mysql/mysqlClient';
 import { fakeSecrets, hasMysqlEnv, mysqlConnection } from '../setup/support';
 import type { StoredConnection } from '../../src/types';
 
+// Uses the configured test user's own database rather than creating one —
+// the account this suite runs against typically only has privileges on a
+// database it was already granted (e.g. MySQL's classicmodels sample), not
+// CREATE DATABASE at the server level.
 describe.skipIf(!hasMysqlEnv)('MySqlClient (live server)', () => {
-    const database = 'sqlexplorer_test';
+    const database = process.env.TEST_MYSQL_DATABASE ?? 'classicmodels';
+    const table = 'sqlexplorer_smoke_actor';
     let connection: StoredConnection;
     let client: MySqlClient;
 
     beforeAll(async () => {
-        // No database selected yet, just to create the one these tests use.
-        const setupConnection = mysqlConnection({ catalog: undefined });
-        const setupClient = new MySqlClient(fakeSecrets() as never, setupConnection, undefined, process.env.TEST_MYSQL_PASSWORD);
-        await setupClient.query(`CREATE DATABASE IF NOT EXISTS ${database}`);
-        await MySqlClient.closeAll(setupConnection.id);
-
         connection = mysqlConnection({ catalog: database });
         client = new MySqlClient(fakeSecrets() as never, connection, undefined, process.env.TEST_MYSQL_PASSWORD);
-        await client.query('CREATE TABLE IF NOT EXISTS actor (id INT PRIMARY KEY, name VARCHAR(50) NOT NULL)');
-        await client.query("INSERT INTO actor (id, name) VALUES (1, 'Alice'), (2, 'Bob'), (3, 'Carol')");
-        await client.query('CREATE OR REPLACE VIEW actor_names AS SELECT name FROM actor');
+        await client.query(`DROP TABLE IF EXISTS ${table}`);
+        await client.query(`CREATE TABLE ${table} (id INT PRIMARY KEY, name VARCHAR(50) NOT NULL)`);
+        await client.query(`INSERT INTO ${table} (id, name) VALUES (1, 'Alice'), (2, 'Bob'), (3, 'Carol')`);
+        await client.query(`CREATE OR REPLACE VIEW ${table}_names AS SELECT name FROM ${table}`);
     });
 
     afterAll(async () => {
         if (!client) { return; } // beforeAll never got far enough to set it up
-        await client.query(`DROP DATABASE IF EXISTS ${database}`);
+        await client.query(`DROP VIEW IF EXISTS ${table}_names`);
+        await client.query(`DROP TABLE IF EXISTS ${table}`);
         await MySqlClient.closeAll(connection.id);
     });
 
@@ -48,34 +49,34 @@ describe.skipIf(!hasMysqlEnv)('MySqlClient (live server)', () => {
 
     it('separates tables from views', async () => {
         const entries = await client.tableEntries(database, database);
-        expect(entries).toContainEqual({ name: 'actor', view: false });
-        expect(entries).toContainEqual({ name: 'actor_names', view: true });
+        expect(entries).toContainEqual({ name: table, view: false });
+        expect(entries).toContainEqual({ name: `${table}_names`, view: true });
     });
 
     it('reads column names and types for a real table', async () => {
-        const columns = await client.columns(database, database, 'actor');
+        const columns = await client.columns(database, database, table);
         expect(columns).toContainEqual(expect.objectContaining({ name: 'id', extra: expect.stringContaining('primary key') }));
         expect(columns).toContainEqual(expect.objectContaining({ name: 'name', extra: expect.stringContaining('not null') }));
     });
 
     it('returns the literal CREATE statement as DDL', async () => {
-        const ddl = await client.tableDdl(database, database, 'actor');
-        expect(ddl).toMatch(/CREATE TABLE `actor`/i);
+        const ddl = await client.tableDdl(database, database, table);
+        expect(ddl).toMatch(new RegExp(`CREATE TABLE \`${table}\``, 'i'));
     });
 
     it('runs a SELECT and returns rows', async () => {
-        const result = await client.query('SELECT * FROM actor ORDER BY id');
+        const result = await client.query(`SELECT * FROM ${table} ORDER BY id`);
         expect(result.columns).toEqual(['id', 'name']);
         expect(result.rows).toEqual([[1, 'Alice'], [2, 'Bob'], [3, 'Carol']]);
     });
 
     it('previews a table through previewTable/previewSql', async () => {
-        const result = await client.previewTable(database, database, 'actor', 2);
+        const result = await client.previewTable(database, database, table, 2);
         expect(result.rows.length).toBe(2);
     });
 
     it('reports non-SELECT statements as an affected-rows summary, not an empty grid', async () => {
-        const result = await client.query("UPDATE actor SET name = 'x' WHERE id = 1");
+        const result = await client.query(`UPDATE ${table} SET name = 'x' WHERE id = 1`);
         expect(result.columns).toEqual(['result']);
         expect(String(result.rows[0][0])).toMatch(/UPDATE — 1 row/i);
     });
@@ -91,7 +92,7 @@ describe.skipIf(!hasMysqlEnv)('MySqlClient (live server)', () => {
             undefined,
             process.env.TEST_MYSQL_PASSWORD
         );
-        const result = await capped.query('SELECT * FROM actor');
+        const result = await capped.query(`SELECT * FROM ${table}`);
         expect(result.rows.length).toBeLessThanOrEqual(2);
         expect(result.truncated).toBe(true);
         await MySqlClient.closeAll(connection.id);
