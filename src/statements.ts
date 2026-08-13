@@ -18,6 +18,10 @@ export function splitStatements(sql: string): SqlStatement[] {
     let quote: "'" | '"' | undefined;
     let comment: 'line' | 'block' | undefined;
     let seenContent = false;
+    // Counts a run of consecutive backslashes right before the current
+    // position, while inside a quote — an odd count means the next quote
+    // character is escaped (MySQL-style `\'`), not a closing quote.
+    let backslashes = 0;
 
     const push = (end: number) => {
         const text = sql.slice(start, end);
@@ -41,15 +45,21 @@ export function splitStatements(sql: string): SqlStatement[] {
             continue;
         }
         if (quote) {
-            // Doubling is how both SQL string and identifier quotes escape themselves.
+            if (character === '\\') { backslashes++; continue; }
             if (character === quote) {
+                const escaped = backslashes % 2 === 1;
+                backslashes = 0;
+                if (escaped) { continue; }
+                // Doubling is the other way SQL string and identifier quotes escape themselves.
                 if (next === quote) { index++; } else { quote = undefined; }
+                continue;
             }
+            backslashes = 0;
             continue;
         }
         if (character === '-' && next === '-') { comment = 'line'; index++; continue; }
         if (character === '/' && next === '*') { comment = 'block'; index++; continue; }
-        if (character === "'" || character === '"') { quote = character; markStart(); continue; }
+        if (character === "'" || character === '"') { quote = character; backslashes = 0; markStart(); continue; }
         if (character === ';') { push(index); continue; }
         if (!/\s/.test(character)) { markStart(); }
     }

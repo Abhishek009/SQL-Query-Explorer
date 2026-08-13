@@ -5,6 +5,7 @@ import { passwordKey } from '../../connectionStore';
 import { RunningQueryRegistry } from '../../runningQueries';
 import { numberSetting } from '../../util';
 import { SqlClient } from '../../client';
+import { splitStatements } from '../../statements';
 
 /** MySQL quotes identifiers with backticks, not the double quotes every other engine here uses. */
 function quoteIdent(identifier: string): string {
@@ -91,7 +92,36 @@ export class MySqlClient implements SqlClient {
     public async query(statement: string, token?: vscode.CancellationToken, database?: string): Promise<TrinoQueryResult> {
         const sql = statement.trim().replace(/;+$/, '');
         if (!sql) { throw new Error('Enter a SQL statement before running it.'); }
-        return this.run(sql, this.maxRows(), database || this.connection.catalog, undefined, token);
+        const parts = splitStatements(sql).map(entry => entry.text).filter(Boolean);
+        if (parts.length === 0) { throw new Error('Enter a SQL statement before running it.'); }
+        if (parts.length === 1) {
+            return this.run(parts[0], this.maxRows(), database || this.connection.catalog, undefined, token);
+        }
+        // A multi-statement script (e.g. running a whole pasted .sql file): MySQL's
+        // wire protocol needs multipleStatements opted in per connection to accept
+        // that in one go, which is deliberately left off. Session state a script
+        // relies on (`SET @x=...`, FOREIGN_KEY_CHECKS, …) also only persists on one
+        // connection, so every statement runs here in turn on the same one instead
+        // of the usual fresh connection per call — matching how a real SQL client
+        // runs a script — and the whole thing stops at the first statement that fails.
+        return this.runSequence(parts, database || this.connection.catalog, token);
+    }
+
+    private async runSequence(statements: string[], database: string | undefined, token?: vscode.CancellationToken): Promise<TrinoQueryResult> {
+        const pool = await this.pool(database);
+        const conn = await new Promise<mysql.PoolConnection>((resolve, reject) => {
+            pool.getConnection((error, connection) => { if (error) { reject(asTrinoStyleError(error)); } else { resolve(connection); } });
+        });
+        try {
+            let result: TrinoQueryResult | undefined;
+            for (const sql of statements) {
+                if (token?.isCancellationRequested) { throw new Error('Query was cancelled.'); }
+                result = await this.runOnConnection(conn, sql, this.maxRows(), undefined, token);
+            }
+            return result!;
+        } finally {
+            conn.release();
+        }
     }
 
     /** MySQL cannot reference another database's table without qualifying it, but the pool is already bound to one. */
@@ -125,67 +155,84 @@ export class MySqlClient implements SqlClient {
         token?: vscode.CancellationToken
     ): Promise<TrinoQueryResult> {
         const pool = await this.pool(database);
+        const conn = await new Promise<mysql.PoolConnection>((resolve, reject) => {
+            pool.getConnection((connectError, connection) => {
+                if (connectError) { reject(asTrinoStyleError(connectError)); } else { resolve(connection); }
+            });
+        });
+        try {
+            return await this.runOnConnection(conn, sql, limit, values, token);
+        } finally {
+            conn.release();
+        }
+    }
+
+    /**
+     * Runs one statement on an already-acquired connection, without releasing it —
+     * callers own the connection's lifecycle, so a multi-statement script can reuse
+     * the same one across several calls and keep session state like `SET @x=...`.
+     */
+    private async runOnConnection(
+        conn: mysql.PoolConnection,
+        sql: string,
+        limit: number,
+        values?: unknown[],
+        token?: vscode.CancellationToken
+    ): Promise<TrinoQueryResult> {
         return new Promise((resolve, reject) => {
             let settled = false;
             const settle = (fn: () => void) => { if (!settled) { settled = true; fn(); } };
 
-            pool.getConnection((connectError, conn) => {
-                if (connectError) { settle(() => reject(asTrinoStyleError(connectError))); return; }
+            const entry = this.registry?.add({
+                connectionName: this.connection.name,
+                sql,
+                startedAt: Date.now(),
+                cancel: () => { conn.destroy(); return Promise.resolve(true); }
+            });
+            const cancellation = token?.onCancellationRequested(() => conn.destroy());
+            const cleanup = () => { cancellation?.dispose(); if (entry) { this.registry?.remove(entry.id); } };
 
-                const entry = this.registry?.add({
-                    connectionName: this.connection.name,
-                    sql,
-                    startedAt: Date.now(),
-                    cancel: () => { conn.destroy(); return Promise.resolve(true); }
-                });
-                const cancellation = token?.onCancellationRequested(() => conn.destroy());
-                const cleanup = () => { cancellation?.dispose(); if (entry) { this.registry?.remove(entry.id); } };
+            let columns: string[] | undefined;
+            const rows: unknown[][] = [];
+            let truncated = false;
 
-                let columns: string[] | undefined;
-                const rows: unknown[][] = [];
-                let truncated = false;
-
-                const query = conn.query({ sql, rowsAsArray: true, values });
-                // mysql2 fires 'fields' for every statement, even a mutation/DDL one —
-                // just with `fields` itself undefined then, not omitted.
-                query.on('fields', (fields: Array<{ name: string }> | undefined) => {
-                    if (fields) { columns = fields.map(field => field.name); }
-                });
-                query.on('result', (row: unknown) => {
-                    if (!columns) {
-                        // No real fields seen yet: an OkPacket from a mutation/DDL statement.
-                        const info = row as { affectedRows?: number };
-                        const affected = info.affectedRows ?? 0;
-                        const command = sql.split(/\s+/)[0].toUpperCase();
-                        conn.release();
-                        cleanup();
-                        settle(() => resolve({
-                            columns: ['result'],
-                            rows: [[`${command} — ${affected} row${affected === 1 ? '' : 's'} affected`]],
-                            truncated: false,
-                            maxRows: limit
-                        }));
-                        return;
-                    }
-                    if (rows.length >= limit) {
-                        truncated = true;
-                        conn.destroy();
-                        cleanup();
-                        settle(() => resolve({ columns: columns!, rows, truncated, maxRows: limit }));
-                        return;
-                    }
-                    rows.push(row as unknown[]);
-                });
-                query.on('error', (error: Error) => {
-                    conn.release();
+            const query = conn.query({ sql, rowsAsArray: true, values });
+            // mysql2 fires 'fields' for every statement, even a mutation/DDL one —
+            // just with `fields` itself undefined then, not omitted.
+            query.on('fields', (fields: Array<{ name: string }> | undefined) => {
+                if (fields) { columns = fields.map(field => field.name); }
+            });
+            query.on('result', (row: unknown) => {
+                if (!columns) {
+                    // No real fields seen yet: an OkPacket from a mutation/DDL statement.
+                    const info = row as { affectedRows?: number };
+                    const affected = info.affectedRows ?? 0;
+                    const command = sql.split(/\s+/)[0].toUpperCase();
                     cleanup();
-                    settle(() => reject(asTrinoStyleError(error)));
-                });
-                query.on('end', () => {
-                    conn.release();
+                    settle(() => resolve({
+                        columns: ['result'],
+                        rows: [[`${command} — ${affected} row${affected === 1 ? '' : 's'} affected`]],
+                        truncated: false,
+                        maxRows: limit
+                    }));
+                    return;
+                }
+                if (rows.length >= limit) {
+                    truncated = true;
+                    conn.destroy();
                     cleanup();
-                    settle(() => resolve({ columns: columns ?? [], rows, truncated, maxRows: limit }));
-                });
+                    settle(() => resolve({ columns: columns!, rows, truncated, maxRows: limit }));
+                    return;
+                }
+                rows.push(row as unknown[]);
+            });
+            query.on('error', (error: Error) => {
+                cleanup();
+                settle(() => reject(asTrinoStyleError(error)));
+            });
+            query.on('end', () => {
+                cleanup();
+                settle(() => resolve({ columns: columns ?? [], rows, truncated, maxRows: limit }));
             });
         });
     }

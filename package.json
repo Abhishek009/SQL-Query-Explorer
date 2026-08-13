@@ -3,7 +3,7 @@
   "displayName": "SQL Query Explorer",
   "publisher": "big-tech-talk",
   "description": "Browse schemas and run SQL from VS Code. Supports Trino, PostgreSQL, Supabase, SQLite, DuckDB, and MySQL.",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "license": "MIT",
   "repository": {
     "type": "git",
