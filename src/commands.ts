@@ -145,7 +145,15 @@ export async function dropTable(
             { location: vscode.ProgressLocation.Notification, title: `Dropping ${tableLabel}…` },
             () => client.query(`DROP TABLE ${qualified}`, undefined, catalog)
         );
-        await provider.refreshItem(ExplorerItem.group(connection.id, catalog, schema, 'tables', 0));
+        // refreshItem(item) clears the cached table listing for this schema, keyed
+        // by string path rather than object identity, so it's safe to use even
+        // though `item` is the dropped table, not the group node that needs to
+        // redraw. A freshly constructed ExplorerItem.group(...) wouldn't do that
+        // redraw — the tree view matches refresh events by the exact object
+        // reference it already has cached, not by equivalent field values — so a
+        // full refresh() is what actually makes the dropped table disappear.
+        await provider.refreshItem(item);
+        provider.refresh();
         vscode.window.showInformationMessage(`Dropped table "${tableLabel}".`);
     } catch (error) {
         const results = tabs.primary(tableLabel);
