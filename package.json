@@ -7,12 +7,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Abhishek009/sql-explorer.git"
+    "url": "https://github.com/Abhishek009/SQL-Query-Explorer.git"
   },
   "bugs": {
-    "url": "https://github.com/Abhishek009/sql-explorer/issues"
+    "url": "https://github.com/Abhishek009/SQL-Query-Explorer/issues"
   },
-  "homepage": "https://github.com/Abhishek009/sql-explorer#readme",
+  "homepage": "https://github.com/Abhishek009/SQL-Query-Explorer#readme",
   "icon": "icon.png",
   "engines": {
     "vscode": "^1.85.0"

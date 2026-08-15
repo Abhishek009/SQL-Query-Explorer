@@ -218,7 +218,7 @@ Settings previously named `trino.*` are deprecated but still read: values are mi
 - **Enterprise authentication** — OAuth2, JWT, and Kerberos beyond the current user and password.
 - **Natural ordering for text sorts** — restore `item9` before `item10` for text columns without the performance cost.
 
-Suggestions and issues are welcome at the [project repository](https://github.com/Abhishek009/sql-explorer).
+Suggestions and issues are welcome at the [project repository](https://github.com/Abhishek009/SQL-Query-Explorer).
 
 ## Notes
 
