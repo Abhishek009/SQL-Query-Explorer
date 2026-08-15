@@ -4,7 +4,7 @@ import { TrinoExplorerProvider, ExplorerDragController, ExplorerItem } from './e
 import { ResultsTabs } from './resultsView';
 import { QueryStatusProvider } from './queryStatus';
 import { SqlCompletionProvider } from './completion';
-import { openScopedQuery, openSqlQueryEditor, pickConnection, previewTable, resolveConnection, runActiveSql, runStatement, selectQueryConnection, selectQueryDatabase, showConnectionWindow, showTableDdl } from './commands';
+import { dropTable, openScopedQuery, openSqlQueryEditor, pickConnection, previewTable, resolveConnection, runActiveSql, runStatement, selectQueryConnection, selectQueryDatabase, showConnectionWindow, showTableDdl } from './commands';
 import { showConnectionError } from './util';
 import { RunningQueryRegistry, RunningQueryStatus, cancelRunningQuery } from './runningQueries';
 import { QueryScope } from './queryScope';
@@ -126,6 +126,9 @@ export function activate(context: vscode.ExtensionContext): void {
     });
     register('sqlExplorer.importData', async (item?: ExplorerItem) => {
         await importDataFromFile(store, context.secrets, provider, running, item);
+    });
+    register('sqlExplorer.dropTable', async (item?: ExplorerItem) => {
+        await dropTable(store, context.secrets, provider, tabs, running, item);
     });
     register('sqlExplorer.openQuery', async () => { await openSqlQueryEditor(store, context.secrets); });
     register('sqlExplorer.runActiveSql', async () => { await runActiveSql(store, context.secrets, status, tabs, running, scope); });

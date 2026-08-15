@@ -3,7 +3,7 @@
   "displayName": "SQL Query Explorer",
   "publisher": "big-tech-talk",
   "description": "Browse schemas and run SQL from VS Code. Supports Trino, PostgreSQL, Supabase, SQLite, DuckDB, and MySQL.",
-  "version": "2.4.0",
+  "version": "2.4.1",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -108,6 +108,11 @@
         "command": "sqlExplorer.importData",
         "title": "SQL: Import Data from CSV…",
         "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "sqlExplorer.dropTable",
+        "title": "SQL: Drop Table…",
+        "icon": "$(trash)"
       },
       {
         "command": "sqlExplorer.refreshNode",
@@ -416,6 +421,11 @@
           "command": "sqlExplorer.importData",
           "when": "view == sqlExplorerConnections && viewItem == sqlExplorer.table",
           "group": "1_table@3"
+        },
+        {
+          "command": "sqlExplorer.dropTable",
+          "when": "view == sqlExplorerConnections && viewItem == sqlExplorer.table",
+          "group": "8_destructive@1"
         },
         {
           "command": "sqlExplorer.newQueryHere",

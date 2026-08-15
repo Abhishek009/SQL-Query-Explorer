@@ -120,6 +120,39 @@ export async function showTableDdl(
     }
 }
 
+/** Drops a table after confirmation, then refreshes its parent group so it disappears from the tree. */
+export async function dropTable(
+    store: ConnectionStore,
+    secrets: vscode.SecretStorage,
+    provider: TrinoExplorerProvider,
+    tabs: ResultsTabs,
+    registry: RunningQueryRegistry,
+    item?: ExplorerItem
+): Promise<void> {
+    const connection = store.get(item?.connectionId);
+    if (!connection || !item?.catalog || !item.schema || !item.table || item.contextValue !== 'sqlExplorer.table') { return; }
+    const { catalog, schema, table } = item;
+    const tableLabel = `${schema}.${table}`;
+    const confirmed = await vscode.window.showWarningMessage(
+        `Drop the table "${tableLabel}"? This cannot be undone.`, { modal: true }, 'Drop Table'
+    );
+    if (confirmed !== 'Drop Table') { return; }
+
+    const client = createClient(secrets, connection, registry);
+    const qualified = client.qualify(catalog, schema, table);
+    try {
+        await vscode.window.withProgress(
+            { location: vscode.ProgressLocation.Notification, title: `Dropping ${tableLabel}…` },
+            () => client.query(`DROP TABLE ${qualified}`, undefined, catalog)
+        );
+        await provider.refreshItem(ExplorerItem.group(connection.id, catalog, schema, 'tables', 0));
+        vscode.window.showInformationMessage(`Dropped table "${tableLabel}".`);
+    } catch (error) {
+        const results = tabs.primary(tableLabel);
+        await showQueryError(results, error, connection, `DROP TABLE ${qualified}`);
+    }
+}
+
 /**
  * Opens a SQL editor already scoped to the node it was launched from, and makes
  * that node's connection active so Cmd+Enter runs against the right coordinator.
