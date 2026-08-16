@@ -32,6 +32,11 @@ export function expandPastedMongoUrl(message: ConnectionMessage): ConnectionMess
         port: '',
         user: message.user.trim() || (user ? decodeURIComponent(user) : message.user),
         password: message.password || (pass ? decodeURIComponent(pass) : message.password),
-        database: message.database.trim() || database
+        database: message.database.trim() || database,
+        // mongodb+srv:// requires TLS in practice (Atlas included), and it's the
+        // driver's own default for that scheme — check the box to match what
+        // will actually happen. A plain mongodb:// paste leaves the toggle alone,
+        // since a self-hosted replica set may or may not need TLS.
+        sslEnabled: scheme.toLowerCase() === 'mongodb+srv' ? true : message.sslEnabled
     };
 }

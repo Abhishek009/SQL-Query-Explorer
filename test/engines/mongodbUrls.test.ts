@@ -66,6 +66,20 @@ describe('expandPastedMongoUrl', () => {
         const result = expandPastedMongoUrl(message({ host: 'mongodb://alice:p%40ss@db.example.com:27017' }));
         expect(result.password).toBe('p@ss');
     });
+
+    it('checks SSL for a pasted mongodb+srv:// string, since that scheme requires TLS in practice', () => {
+        const result = expandPastedMongoUrl(message({
+            host: 'mongodb+srv://cluster0.example.mongodb.net', sslEnabled: false
+        }));
+        expect(result.sslEnabled).toBe(true);
+    });
+
+    it('leaves SSL alone for a plain mongodb:// string, since a self-hosted replica set may not need it', () => {
+        const result = expandPastedMongoUrl(message({
+            host: 'mongodb://db.example.com:27017', sslEnabled: false
+        }));
+        expect(result.sslEnabled).toBe(false);
+    });
 });
 
 describe('mongoHostAndPort', () => {

@@ -324,7 +324,13 @@ export class MongodbClient implements SqlClient {
         const password = this.passwordOverride ?? await this.secrets.get(passwordKey(this.connection.id));
         const client = new MongoClient(this.connection.url, {
             auth: this.connection.user ? { username: this.connection.user, password: password || '' } : undefined,
-            tls: this.connection.ssl,
+            // `undefined`, not `false`, when the SSL toggle is off — an explicit
+            // `tls: false` would force TLS off even for a mongodb+srv:// URL,
+            // where the driver's own default is TLS on and every real server
+            // (Atlas included) requires it; leaving it undefined lets that default
+            // apply instead of overriding it, while the toggle can still force TLS
+            // on for a plain mongodb:// host that needs it.
+            tls: this.connection.ssl || undefined,
             serverSelectionTimeoutMS: 10_000,
             connectTimeoutMS: 10_000
         });
