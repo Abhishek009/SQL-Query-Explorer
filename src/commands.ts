@@ -14,10 +14,12 @@ import { createEmptyDatabase } from './engines/sqlite/sqliteClient';
 import { isSqliteInstalled, installSqlite } from './engines/sqlite/sqliteRuntime';
 import { createEmptyDuckdb } from './engines/duckdb/duckdbClient';
 import { installDuckdb, isDuckdbInstalled } from './engines/duckdb/duckdbRuntime';
-import { addressesByDatabase, closeAllClients, engineOf, ENGINE_LABELS } from './client';
+import { addressesByDatabase, closeAllClients, engineOf, ENGINE_LABELS, speaksSql } from './client';
 import { expandPastedUrl, parseConnectionUrl } from './engines/trino/trinoUrls';
 import { hostAndPort } from './engines/postgres/postgresClient';
 import { expandPastedSupabaseUrl } from './engines/supabase/supabaseUrls';
+import { expandPastedMongoUrl, isMongoConnectionString } from './engines/mongodb/mongodbUrls';
+import { mongoHostAndPort } from './engines/mongodb/mongodbClient';
 import { formatHost, previewRowLimit, quoteIdentifier, showConnectionError, summarize } from './util';
 
 export async function pickConnection(store: ConnectionStore, placeHolder: string): Promise<StoredConnection | undefined> {
@@ -140,10 +142,11 @@ export async function dropTable(
 
     const client = createClient(secrets, connection, registry);
     const qualified = client.qualify(catalog, schema, table);
+    const dropStatement = speaksSql(engineOf(connection)) ? `DROP TABLE ${qualified}` : `db.${table}.drop()`;
     try {
         await vscode.window.withProgress(
             { location: vscode.ProgressLocation.Notification, title: `Dropping ${tableLabel}…` },
-            () => client.query(`DROP TABLE ${qualified}`, undefined, catalog)
+            () => client.query(dropStatement, undefined, catalog)
         );
         // refreshItem(item) clears the cached table listing for this schema, keyed
         // by string path rather than object identity, so it's safe to use even
@@ -157,7 +160,7 @@ export async function dropTable(
         vscode.window.showInformationMessage(`Dropped table "${tableLabel}".`);
     } catch (error) {
         const results = tabs.primary(tableLabel);
-        await showQueryError(results, error, connection, `DROP TABLE ${qualified}`);
+        await showQueryError(results, error, connection, dropStatement);
     }
 }
 
@@ -172,10 +175,12 @@ export async function openScopedQuery(store: ConnectionStore, item?: ExplorerIte
 
     const engine = engineOf(connection);
     const scope = qualifiedName(item, engine);
-    const body = item.kind === 'table'
-        ? `SELECT *\nFROM ${scope}\nLIMIT ${previewRowLimit()};\n`
-        // Ends on the dot so completion offers the next level straight away.
-        : scope ? `SELECT *\nFROM ${scope}.` : '';
+    const body = !speaksSql(engine)
+        ? (item.kind === 'table' && item.table ? `db.${item.table}.find().limit(${previewRowLimit()});\n` : '')
+        : item.kind === 'table'
+            ? `SELECT *\nFROM ${scope}\nLIMIT ${previewRowLimit()};\n`
+            // Ends on the dot so completion offers the next level straight away.
+            : scope ? `SELECT *\nFROM ${scope}.` : '';
     const document = await vscode.workspace.openTextDocument({
         language: 'sql',
         content: `${scopeHeader(connection, item.catalog)}\n${body}`
@@ -390,7 +395,7 @@ export async function showSqlResults(
 export function connectionFromForm(request: ConnectionMessage, id: string): StoredConnection {
     const defaultName = {
         trino: 'Trino Connection', postgres: 'PostgreSQL Connection', supabase: 'Supabase Connection',
-        sqlite: 'SQLite Database', duckdb: 'DuckDB Database', mysql: 'MySQL Connection'
+        sqlite: 'SQLite Database', duckdb: 'DuckDB Database', mysql: 'MySQL Connection', mongodb: 'MongoDB Connection'
     }[request.engine];
     if (request.engine === 'sqlite' || request.engine === 'duckdb') {
         const file = request.file.trim();
@@ -404,6 +409,27 @@ export function connectionFromForm(request: ConnectionMessage, id: string): Stor
             // Nothing else identifies "the database" for a single-file engine, but the
             // lens and scope headers still want a name to show for it.
             catalog: path.basename(file) || undefined,
+            maxRows: parseMaxRows(request.maxRows)
+        };
+    }
+    if (request.engine === 'mongodb') {
+        const rawHost = request.host.trim();
+        // A pasted connection string carries its own host(s)/port/query params and
+        // is kept verbatim; a bare host name is assembled the way every other
+        // wire-protocol engine here does, with a required port.
+        const url = isMongoConnectionString(rawHost)
+            ? rawHost.replace(/\/\/[^@/]*@/, '//')
+            : `mongodb://${formatHost(rawHost)}:${request.port.trim()}`;
+        return {
+            id,
+            name: request.name.trim() || defaultName,
+            type: 'mongodb',
+            url,
+            user: request.user.trim(),
+            // Like MySQL, a MongoClient can browse every database it's authorised
+            // for, so an empty field means "all of them" rather than a default.
+            catalog: request.database.trim() || undefined,
+            ssl: request.sslEnabled,
             maxRows: parseMaxRows(request.maxRows)
         };
     }
@@ -474,7 +500,9 @@ export async function showConnectionWindow(
     // focus, rather than pre-filling fields the user would have to type over.
     const current = existing && !isLocalFile
         ? wireProtocol
-            ? { ...hostAndPort(existing.url), sslEnabled: Boolean(existing.ssl) }
+            ? engine === 'mongodb'
+                ? { ...mongoHostAndPort(existing.url), sslEnabled: Boolean(existing.ssl) }
+                : { ...hostAndPort(existing.url), sslEnabled: Boolean(existing.ssl) }
             : parseConnectionUrl(existing.url)
         : { host: '', port: '', sslEnabled: false };
     const panel = vscode.window.createWebviewPanel(
@@ -553,7 +581,9 @@ export async function showConnectionWindow(
             return;
         }
         if (!isConnectionMessage(message)) { return; }
-        const request = message.engine === 'supabase' ? expandPastedSupabaseUrl(message) : expandPastedUrl(message);
+        const request = message.engine === 'supabase' ? expandPastedSupabaseUrl(message)
+            : message.engine === 'mongodb' ? expandPastedMongoUrl(message)
+            : expandPastedUrl(message);
         const validation = validateConnection(request);
         if (validation) {
             void panel.webview.postMessage({ type: 'error', message: validation });

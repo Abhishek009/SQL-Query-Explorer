@@ -6,6 +6,7 @@ import { PostgresClient } from './engines/postgres/postgresClient';
 import { SqliteClient } from './engines/sqlite/sqliteClient';
 import { DuckdbClient } from './engines/duckdb/duckdbClient';
 import { MySqlClient } from './engines/mysql/mysqlClient';
+import { MongodbClient } from './engines/mongodb/mongodbClient';
 
 /**
  * What the explorer, completion, and query commands need from an engine. Every
@@ -43,9 +44,9 @@ export interface SqlClient {
     testConnection(token?: vscode.CancellationToken): Promise<string>;
 }
 
-export type EngineId = 'trino' | 'postgres' | 'supabase' | 'sqlite' | 'duckdb' | 'mysql';
+export type EngineId = 'trino' | 'postgres' | 'supabase' | 'sqlite' | 'duckdb' | 'mysql' | 'mongodb';
 
-const NON_TRINO_TYPES = new Set<StoredConnection['type']>(['postgres', 'supabase', 'sqlite', 'duckdb', 'mysql']);
+const NON_TRINO_TYPES = new Set<StoredConnection['type']>(['postgres', 'supabase', 'sqlite', 'duckdb', 'mysql', 'mongodb']);
 
 /** Connections without a type predate Postgres support, so they are Trino. */
 export function engineOf(connection: StoredConnection): EngineId {
@@ -58,8 +59,14 @@ export const ENGINE_LABELS: Record<EngineId, string> = {
     supabase: 'Supabase',
     sqlite: 'SQLite',
     duckdb: 'DuckDB',
-    mysql: 'MySQL'
+    mysql: 'MySQL',
+    mongodb: 'MongoDB'
 };
+
+/** MongoDB speaks shell syntax, not SQL — commands built elsewhere need to know which to generate. */
+export function speaksSql(engine: EngineId): boolean {
+    return engine !== 'mongodb';
+}
 
 /** Everything but Trino addresses tables via a database (a Postgres/Supabase/MySQL
  *  database, or a SQLite/DuckDB file) rather than a catalog named inside the SQL itself. */
@@ -78,6 +85,7 @@ export function createClient(
         case 'sqlite': return new SqliteClient(secrets, connection, registry, password);
         case 'duckdb': return new DuckdbClient(secrets, connection);
         case 'mysql': return new MySqlClient(secrets, connection, registry, password);
+        case 'mongodb': return new MongodbClient(secrets, connection, registry, password);
         case 'postgres':
         case 'supabase': return new PostgresClient(secrets, connection, registry, password);
         default: return new TrinoClient(secrets, connection, registry, password);
@@ -94,4 +102,5 @@ export async function closeAllClients(connectionId?: string): Promise<void> {
     SqliteClient.closeAll(connectionId);
     DuckdbClient.closeAll(connectionId);
     await MySqlClient.closeAll(connectionId);
+    await MongodbClient.closeAll(connectionId);
 }

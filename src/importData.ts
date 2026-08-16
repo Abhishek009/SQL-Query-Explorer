@@ -1,17 +1,18 @@
 import * as vscode from 'vscode';
 import { ConnectionStore } from './connectionStore';
-import { createClient } from './client';
+import { createClient, engineOf, speaksSql } from './client';
 import { ExplorerItem, TrinoExplorerProvider } from './explorer';
 import { RunningQueryRegistry } from './runningQueries';
 import { parseCsv } from './csv';
 import { importFormHtml, isImportMessage } from './importForm';
 import { quoteIdentifier, quoteLiteral, summarize } from './util';
 
-/** Rows per INSERT statement — large enough to be fast, small enough that one
- *  statement never gets close to a coordinator's/driver's max-query-size limit. */
+/** Rows per INSERT/insertMany batch — large enough to be fast, small enough that
+ *  one statement never gets close to a coordinator's/driver's max-query-size limit. */
 const BATCH_SIZE = 500;
 
 const NUMERIC_TYPE = /^(int|integer|bigint|smallint|tinyint|float|double|decimal|numeric|real)/i;
+const BOOLEAN_TYPE = /^bool/i;
 
 /** A cell's SQL literal, typed by the target column rather than guessed from the text. */
 export function cellLiteral(raw: string | undefined, columnType: string): string {
@@ -20,6 +21,14 @@ export function cellLiteral(raw: string | undefined, columnType: string): string
         return Number.isFinite(Number(raw)) ? raw : 'NULL';
     }
     return quoteLiteral(raw);
+}
+
+/** A cell's JS value for a MongoDB document, typed the same way cellLiteral() types SQL. */
+export function mongoCellValue(raw: string | undefined, columnType: string): unknown {
+    if (raw === undefined || raw === '') { return null; }
+    if (NUMERIC_TYPE.test(columnType) && Number.isFinite(Number(raw))) { return Number(raw); }
+    if (BOOLEAN_TYPE.test(columnType)) { return raw.toLowerCase() === 'true'; }
+    return raw;
 }
 
 export async function importDataFromFile(
@@ -76,6 +85,8 @@ export async function importDataFromFile(
         columns
     );
 
+    const isSql = speaksSql(engineOf(connection));
+
     panel.webview.onDidReceiveMessage(async (message: unknown) => {
         if (!isImportMessage(message)) { panel.dispose(); return; }
         const mapped = columns
@@ -93,15 +104,20 @@ export async function importDataFromFile(
                 { location: vscode.ProgressLocation.Notification, title: `Importing into ${tableLabel}…`, cancellable: true },
                 async (progress, token) => {
                     if (message.truncateFirst) {
-                        await client.query(`DELETE FROM ${qualified}`, token, catalog);
+                        const clearStatement = isSql ? `DELETE FROM ${qualified}` : `db.${table}.deleteMany({})`;
+                        await client.query(clearStatement, token, catalog);
                     }
                     for (let start = 0; start < dataRows.length; start += BATCH_SIZE) {
                         if (token.isCancellationRequested) { break; }
                         const batch = dataRows.slice(start, start + BATCH_SIZE);
-                        const values = batch.map(row =>
-                            `(${mapped.map(entry => cellLiteral(row[entry.sourceIndex], entry.column.type)).join(', ')})`
-                        ).join(', ');
-                        await client.query(`INSERT INTO ${qualified} (${columnList}) VALUES ${values}`, token, catalog);
+                        const statement = isSql
+                            ? `INSERT INTO ${qualified} (${columnList}) VALUES ${batch.map(row =>
+                                `(${mapped.map(entry => cellLiteral(row[entry.sourceIndex], entry.column.type)).join(', ')})`
+                            ).join(', ')}`
+                            : `db.${table}.insertMany(${JSON.stringify(batch.map(row =>
+                                Object.fromEntries(mapped.map(entry => [entry.column.name, mongoCellValue(row[entry.sourceIndex], entry.column.type)]))
+                            ))})`;
+                        await client.query(statement, token, catalog);
                         imported += batch.length;
                         progress.report({
                             message: `${imported.toLocaleString()} / ${dataRows.length.toLocaleString()} row(s)`,

@@ -2,7 +2,7 @@
 
 A VS Code extension for browsing database schemas and running SQL without leaving the editor.
 
-Supports **[Trino](https://trino.io)**, **[PostgreSQL](https://www.postgresql.org)**, **[Supabase](https://supabase.com)**, **[SQLite](https://www.sqlite.org)**, **[DuckDB](https://duckdb.org)**, and **[MySQL](https://www.mysql.com)**. The explorer, results grid, and editor features are shared by all of them, so further engines slot in behind the same interface.
+Supports **[Trino](https://trino.io)**, **[PostgreSQL](https://www.postgresql.org)**, **[Supabase](https://supabase.com)**, **[SQLite](https://www.sqlite.org)**, **[DuckDB](https://duckdb.org)**, **[MySQL](https://www.mysql.com)**, and **[MongoDB](https://www.mongodb.com)**. The explorer, results grid, and editor features are shared by all of them, so further engines slot in behind the same interface.
 
 ### Database support
 
@@ -14,12 +14,13 @@ Supports **[Trino](https://trino.io)**, **[PostgreSQL](https://www.postgresql.or
 | [SQLite](https://www.sqlite.org) | Supported |
 | [DuckDB](https://duckdb.org) | Supported |
 | [MySQL](https://www.mysql.com) | Supported |
+| [MongoDB](https://www.mongodb.com) | Supported |
 | [Snowflake](https://www.snowflake.com) | Not yet supported |
 
 ## Features
 
 ### Connections
-- **Pick the engine when adding a connection** — Trino, PostgreSQL, Supabase, SQLite, DuckDB, or MySQL — and the form shows only the fields that engine needs.
+- **Pick the engine when adding a connection** — Trino, PostgreSQL, Supabase, SQLite, DuckDB, MySQL, or MongoDB — and the form shows only the fields that engine needs.
 - **Test Connection** runs a real query against the details you typed, before saving anything.
 - **Manage several servers at once** — dev, staging, and production sit side by side in the **Connections** view. Add one with the **+** button, then edit, remove, or refresh each from its context menu.
 - One connection is **active** for queries at a time; right-click → **Use Connection for Queries** to switch.
@@ -29,9 +30,10 @@ Supports **[Trino](https://trino.io)**, **[PostgreSQL](https://www.postgresql.or
 - **SQLite** gets its own tab too, with nothing but a **Database file** field, native **Browse…**/**New Database…** pickers, and a one-time **Install** step — no host, port, user, password, or SSL, since it's a local file rather than a server. See [SQLite connections](#sqlite-connections).
 - **DuckDB** gets a tab with the same local-file shape and install step as SQLite — see [DuckDB connections](#duckdb-connections).
 - **MySQL** gets its own tab too — host/port/user/password/database/SSL, the same shape as PostgreSQL's. See [MySQL connections](#mysql-connections).
+- **MongoDB** gets its own tab too, and is the one engine here that doesn't speak SQL — the editor takes Mongo shell syntax instead (`db.collection.find({...})`). See [MongoDB connections](#mongodb-connections).
 - Passwords are stored in **VS Code Secret Storage**, never in `settings.json`.
-- Trino traffic goes through the `/v1/statement` REST endpoint; PostgreSQL, Supabase, and MySQL use their native wire protocols; SQLite and DuckDB open their file directly on disk.
-- For PostgreSQL, Supabase, and MySQL the tree's top level lists **databases** on the server, so siblings of the one you opened are browsable too. For SQLite and DuckDB the file itself is the only database, so the tree goes straight to its tables and views.
+- Trino traffic goes through the `/v1/statement` REST endpoint; PostgreSQL, Supabase, MySQL, and MongoDB use their native wire protocols; SQLite and DuckDB open their file directly on disk.
+- For PostgreSQL, Supabase, MySQL, and MongoDB the tree's top level lists **databases** on the server, so siblings of the one you opened are browsable too. For SQLite and DuckDB the file itself is the only database, so the tree goes straight to its tables and views.
 
 #### Connection URL formats
 
@@ -107,6 +109,31 @@ Details:
 - Runs through [`mysql2`](https://www.npmjs.com/package/mysql2), a pure-JS driver with no native binary — bundled normally, no install-on-demand step like SQLite/DuckDB need.
 - Identifiers are quoted with backticks (MySQL's own convention), not the double quotes every other engine here uses.
 
+#### MongoDB connections
+
+MongoDB's tab has the same host/port/username/password/database/SSL shape as MySQL's, but two fields work differently since Mongo has no fixed port scheme and often no auth at all:
+
+- **Port** is optional. Leave it blank for a manually typed host and the connection is built as `mongodb://host` (the driver's own default port applies); it's mainly left blank automatically when you paste a connection string (see below), since `mongodb+srv://` addresses carry no port of their own.
+- **Username** is optional — a local MongoDB with auth disabled, common in development, needs neither a username nor a password.
+- **Paste a full `mongodb://` or `mongodb+srv://` connection string into Host** (e.g. Atlas' "Connect your application" string) and the user, password, and default database fill themselves in; the host(s), port, and any query parameters (`replicaSet`, `authSource`, `retryWrites`, …) stay together as one string in Host rather than being split apart, since a replica set's extra hosts and Atlas' SRV-based discovery don't reduce to a single host/port pair the way MySQL's or Postgres' do.
+- Leave **Default database** blank to browse every database the connection is authorised to list; set it to scope a fresh query editor to one by default, or to skip the `listDatabases` server command entirely for a restricted user (some shared Atlas tiers only grant access to one database, not the admin-level command needed to enumerate all of them).
+
+**The query editor takes Mongo shell syntax, not SQL** — the same commands you'd type into `mongosh`:
+
+```js
+db.orders.find({ status: "shipped" }).sort({ createdAt: -1 }).limit(20)
+db.orders.aggregate([{ $match: { status: "shipped" } }, { $count: "total" }])
+db.orders.updateOne({ _id: ObjectId("...") }, { $set: { status: "delivered" } })
+db.getCollectionNames()
+```
+
+Details:
+- Supported methods: `find` (with chained `.sort()`/`.limit()`/`.skip()`/`.project()`), `findOne`, `aggregate`, `countDocuments`, `distinct`, `insertOne`, `insertMany`, `updateOne`, `updateMany`, `replaceOne`, `deleteOne`, `deleteMany`, `drop`, plus the db-level `getCollectionNames`, `stats`, and `runCommand`.
+- Shell-only constructors work as expected inside a command — `ObjectId("...")`, `ISODate("...")`, `NumberLong(...)`, `NumberInt(...)`, `NumberDecimal(...)`. Argument text runs in a sandboxed `vm` context with only those constructors available, not Node's real globals, so a mistyped or pasted command can't reach outside the query itself.
+- Collections have no fixed schema, so the tree's "columns" and **Show Table DDL** output are both inferred by sampling up to 20 documents — DDL shows the inferred field shape plus one example document rather than a `CREATE TABLE`.
+- A mutation reports an affected-count summary (`updateOne — matched 1, modified 1`) rather than an empty grid, the same as every other engine here.
+- Runs through the official [`mongodb`](https://www.npmjs.com/package/mongodb) driver, a pure-JS package with no native binary — bundled normally, no install-on-demand step like SQLite/DuckDB need.
+
 #### Importing CSV data
 
 Right-click any table (not a view) and choose **Import Data from CSV…** to load rows from a local file without hand-writing `INSERT` statements:
@@ -114,10 +141,10 @@ Right-click any table (not a view) and choose **Import Data from CSV…** to loa
 1. Pick a `.csv` file. The first row is always treated as the header.
 2. A mapping screen shows every column in the table beside a dropdown of the file's columns — pre-matched by name where they agree, otherwise left to **Skip**. A preview of the first few file rows sits below it so you can sanity-check before committing.
 3. Optionally check **Delete existing rows first** to replace the table's contents rather than append to them.
-4. **Import** runs ordinary batched `INSERT` statements (500 rows per statement) through the same connection, so it works identically across Trino, PostgreSQL, Supabase, and SQLite — no per-engine import path.
+4. **Import** runs in batches of 500 rows per statement through the same connection — ordinary `INSERT` statements for every SQL engine, or `insertMany([...])` documents for MongoDB.
 
 Details:
-- A cell is inserted as a number only when the *target column's* declared type looks numeric (`INTEGER`, `REAL`, `DECIMAL`, …); otherwise it's inserted as a quoted string. A numeric column with unparseable text in a given row gets `NULL` for that cell rather than failing the whole import.
+- A cell is inserted as a number only when the *target column's* inferred type looks numeric (`INTEGER`, `REAL`, `DECIMAL`, … for SQL engines; `number` for MongoDB's sampled columns); otherwise it's inserted as a string. A numeric column with unparseable text in a given row gets `NULL` for that cell rather than failing the whole import.
 - An empty cell always becomes `NULL`, regardless of column type.
 - If a batch fails partway through, the import stops there and reports how many rows made it in before the error — earlier batches are not rolled back.
 - There's no Excel (`.xlsx`) support yet, only CSV.

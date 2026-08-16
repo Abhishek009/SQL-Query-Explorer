@@ -51,6 +51,20 @@ export function mysqlConnection(overrides: Partial<StoredConnection> = {}): Stor
     };
 }
 
+export function mongodbConnection(overrides: Partial<StoredConnection> = {}): StoredConnection {
+    return {
+        id: randomUUID(),
+        name: 'test-mongodb',
+        type: 'mongodb',
+        url: `mongodb://${process.env.TEST_MONGO_HOST}:${process.env.TEST_MONGO_PORT}`,
+        user: process.env.TEST_MONGO_USER ?? '',
+        catalog: process.env.TEST_MONGO_DATABASE,
+        ssl: false,
+        ...overrides
+    };
+}
+
 export const hasTrinoEnv = Boolean(process.env.TEST_TRINO_HOST && process.env.TEST_TRINO_PORT);
 export const hasPostgresEnv = Boolean(process.env.TEST_PG_HOST && process.env.TEST_PG_PORT);
 export const hasMysqlEnv = Boolean(process.env.TEST_MYSQL_HOST && process.env.TEST_MYSQL_PORT);
+export const hasMongoEnv = Boolean(process.env.TEST_MONGO_HOST && process.env.TEST_MONGO_PORT);

@@ -5,10 +5,11 @@ import { supabaseFieldsHtml } from './engines/supabase/supabaseConnectionFields'
 import { sqliteFieldsHtml } from './engines/sqlite/sqliteConnectionFields';
 import { duckdbFieldsHtml } from './engines/duckdb/duckdbConnectionFields';
 import { mysqlFieldsHtml } from './engines/mysql/mysqlConnectionFields';
+import { mongodbFieldsHtml } from './engines/mongodb/mongodbConnectionFields';
 
 export interface ConnectionFormData {
     name: string;
-    engine: 'trino' | 'postgres' | 'supabase' | 'sqlite' | 'duckdb' | 'mysql';
+    engine: 'trino' | 'postgres' | 'supabase' | 'sqlite' | 'duckdb' | 'mysql' | 'mongodb';
     host: string;
     port: string;
     sslEnabled: boolean;
@@ -69,10 +70,19 @@ export function validateConnection(value: ConnectionMessage): string | undefined
     if (value.engine === 'sqlite' || value.engine === 'duckdb') {
         return value.file.trim() ? undefined : `Choose a ${value.engine === 'sqlite' ? 'SQLite' : 'DuckDB'} database file.`;
     }
+    const isMongo = value.engine === 'mongodb';
+    // A pasted mongodb:// / mongodb+srv:// string carries everything itself —
+    // the driver reports anything actually wrong with it once a connection is attempted.
+    if (isMongo && /^mongodb(\+srv)?:\/\//i.test(value.host.trim())) { return undefined; }
     if (/:\/\//.test(value.host)) { return 'Could not read that URL. Use a host name, http(s)://host:port, or jdbc:trino://host:port.'; }
     if (!value.host.trim()) { return 'Enter a host name, an IP address, or paste a JDBC/HTTP URL.'; }
-    if (!/^\d+$/.test(value.port.trim()) || Number(value.port) < 1 || Number(value.port) > 65535) { return 'Port must be between 1 and 65535.'; }
-    if (!value.user.trim()) { return 'A user name is required.'; }
+    // MongoDB's port is optional — a blank one is unusual for a manually typed
+    // host, but the field can be left as-is after clearing a pasted connection string.
+    if (!isMongo || value.port.trim()) {
+        if (!/^\d+$/.test(value.port.trim()) || Number(value.port) < 1 || Number(value.port) > 65535) { return 'Port must be between 1 and 65535.'; }
+    }
+    // Local/unauthenticated MongoDB is common enough that a user name isn't assumed required.
+    if (!isMongo && !value.user.trim()) { return 'A user name is required.'; }
     return undefined;
 }
 
@@ -92,6 +102,7 @@ export function connectionFormHtml(webview: vscode.Webview, values: ConnectionFo
     const sqliteValues = values.engine === 'sqlite' ? values : { ...BLANK, engine: 'sqlite' as const };
     const duckdbValues = values.engine === 'duckdb' ? values : { ...BLANK, engine: 'duckdb' as const };
     const mysqlValues = values.engine === 'mysql' ? values : { ...BLANK, engine: 'mysql' as const };
+    const mongodbValues = values.engine === 'mongodb' ? values : { ...BLANK, engine: 'mongodb' as const };
 
     const styles = `
 :root{--gap:12px;--radius:6px}
@@ -168,7 +179,8 @@ button:focus-visible{outline:2px solid var(--vscode-focusBorder,#2f7ce0);outline
     const isSqlite = values.engine === 'sqlite';
     const isDuckdb = values.engine === 'duckdb';
     const isMysql = values.engine === 'mysql';
-    const isTrino = !isPostgres && !isSupabase && !isSqlite && !isDuckdb && !isMysql;
+    const isMongodb = values.engine === 'mongodb';
+    const isTrino = !isPostgres && !isSupabase && !isSqlite && !isDuckdb && !isMysql && !isMongodb;
     const tab = (active: boolean) => active ? ' active' : '';
     const selected = (active: boolean) => active ? 'true' : 'false';
 
@@ -189,6 +201,7 @@ button:focus-visible{outline:2px solid var(--vscode-focusBorder,#2f7ce0);outline
     <button type="button" class="tab${tab(isSqlite)}" data-pane="sqlite" data-engine="sqlite" role="tab" aria-selected="${selected(isSqlite)}"><span class="tab-icon" style="background:#003b57">L</span>SQLite</button>
     <button type="button" class="tab${tab(isDuckdb)}" data-pane="duckdb" data-engine="duckdb" role="tab" aria-selected="${selected(isDuckdb)}"><span class="tab-icon" style="background:#fff000;color:#000">D</span>DuckDB</button>
     <button type="button" class="tab${tab(isMysql)}" data-pane="mysql" data-engine="mysql" role="tab" aria-selected="${selected(isMysql)}"><span class="tab-icon" style="background:#00758f">M</span>MySQL</button>
+    <button type="button" class="tab${tab(isMongodb)}" data-pane="mongodb" data-engine="mongodb" role="tab" aria-selected="${selected(isMongodb)}"><span class="tab-icon" style="background:#13aa52">🍃</span>MongoDB</button>
   </div>
   <form id="connection">
    <div class="pane${tab(isTrino)}" data-pane="trino">${trinoFieldsHtml(trinoValues, passwordHint, hasPassword)}
@@ -202,6 +215,8 @@ button:focus-visible{outline:2px solid var(--vscode-focusBorder,#2f7ce0);outline
    <div class="pane${tab(isDuckdb)}" data-pane="duckdb">${duckdbFieldsHtml(duckdbValues)}
    </div>
    <div class="pane${tab(isMysql)}" data-pane="mysql">${mysqlFieldsHtml(mysqlValues, passwordHint, hasPassword)}
+   </div>
+   <div class="pane${tab(isMongodb)}" data-pane="mongodb">${mongodbFieldsHtml(mongodbValues, passwordHint, hasPassword)}
    </div>
    <div id="result" class="result" role="status"></div>
   </form>
@@ -272,7 +287,15 @@ function mysqlPayload(kind){
     catalog:'',schema:'',database:byId('m-database').value,
     maxRows:byId('m-maxRows').value,connect};
 }
-const payloadByEngine={postgres:postgresPayload,supabase:supabasePayload,sqlite:sqlitePayload,duckdb:duckdbPayload,mysql:mysqlPayload,trino:trinoPayload};
+function mongodbPayload(kind){
+  const port=byId('g-port');
+  return {type:kind,engine:'mongodb',name:byId('g-name').value,host:byId('g-host').value,
+    port:port.value.trim(),sslEnabled:byId('g-ssl').checked,sslVerify:true,user:byId('g-user').value,
+    password:byId('g-password').value,clearPassword:byId('g-clearPassword').checked,
+    catalog:'',schema:'',database:byId('g-database').value,
+    maxRows:byId('g-maxRows').value,connect};
+}
+const payloadByEngine={postgres:postgresPayload,supabase:supabasePayload,sqlite:sqlitePayload,duckdb:duckdbPayload,mysql:mysqlPayload,mongodb:mongodbPayload,trino:trinoPayload};
 function payload(kind){ return payloadByEngine[engine](kind); }
 
 document.querySelectorAll('button[type=submit]').forEach(b=>b.addEventListener('click',()=>{connect=b.dataset.connect==='true';}));
@@ -344,7 +367,7 @@ window.addEventListener('message',e=>{
     byId(e.data.engine==='duckdb'?'d-file':'l-file').value=e.data.path;
   }
 });
-const focusIds={trino:'t-host',postgres:'p-host',supabase:'s-host',sqlite:'l-file',duckdb:'d-file',mysql:'m-host'};
+const focusIds={trino:'t-host',postgres:'p-host',supabase:'s-host',sqlite:'l-file',duckdb:'d-file',mysql:'m-host',mongodb:'g-host'};
 byId(focusIds[engine]).focus();`;
 
     return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Trino Connection</title><style>${styles}</style></head><body>${body}<script nonce="${nonce}">${script}</script></body></html>`;
