@@ -37,6 +37,28 @@ export function isConnectionMessage(value: unknown): value is ConnectionMessage 
     return typeof value === 'object' && value !== null && (type === 'save' || type === 'test');
 }
 
+/**
+ * Fired when a Host field that accepts a pasted connection string (Trino,
+ * Supabase, MongoDB) loses focus, so the form can show what a paste actually
+ * expanded into rather than only applying it invisibly at Test/Save time.
+ */
+export interface ExpandHostMessage {
+    type: 'expandHost';
+    engine: ConnectionFormData['engine'];
+    host: string;
+    port: string;
+    sslEnabled: boolean;
+    user: string;
+    password: string;
+    catalog: string;
+    schema: string;
+    database: string;
+}
+
+export function isExpandHostMessage(value: unknown): value is ExpandHostMessage {
+    return typeof value === 'object' && value !== null && (value as { type?: unknown }).type === 'expandHost';
+}
+
 /** The SQLite/DuckDB tabs share a "local file" shape, tagged by which engine asked. */
 export type FileEngine = 'sqlite' | 'duckdb';
 
@@ -311,6 +333,13 @@ byId('l-new').addEventListener('click',()=>{ vscode.postMessage({type:'createFil
 byId('d-browse').addEventListener('click',()=>{ vscode.postMessage({type:'browseFile',engine:'duckdb'}); });
 byId('d-new').addEventListener('click',()=>{ vscode.postMessage({type:'createFile',engine:'duckdb'}); });
 
+// Trino/Supabase/MongoDB accept a pasted connection string in Host — leaving
+// the field shows what it expanded into (user/password/database/...) instead
+// of only applying it invisibly once Test/Save is clicked.
+byId('t-host').addEventListener('blur',()=>{ vscode.postMessage(trinoPayload('expandHost')); });
+byId('s-host').addEventListener('blur',()=>{ vscode.postMessage(supabasePayload('expandHost')); });
+byId('g-host').addEventListener('blur',()=>{ vscode.postMessage(mongodbPayload('expandHost')); });
+
 // SQLite and DuckDB both download their native module on demand rather than
 // bundling it, so both tabs lead with the same install-banner flow — just
 // different element id prefixes, labels, and download sizes.
@@ -342,9 +371,29 @@ function setupRuntimeBanner(runtimeEngine){
 }
 const runtimeBanners={sqlite:setupRuntimeBanner('sqlite'),duckdb:setupRuntimeBanner('duckdb')};
 
+const hostExpandPrefix={trino:'t',supabase:'s',mongodb:'g'};
 window.addEventListener('message',e=>{
   if(e.data.type==='error'){
     const box=byId('error'); box.textContent=e.data.message; box.classList.add('show'); box.scrollIntoView({block:'nearest'});
+  }
+  if(e.data.type==='hostExpanded'){
+    const p=hostExpandPrefix[e.data.engine];
+    // Every field below is always defined on the way back — including an
+    // intentionally empty one, like MongoDB clearing Port for a pasted
+    // connection string — so the only real guard is "this engine has no such field".
+    const setField=(id,value,isCheckbox)=>{
+      const el=byId(id);
+      if(!el){ return; }
+      if(isCheckbox){ el.checked=value; } else { el.value=value; }
+    };
+    setField(p+'-host',e.data.host);
+    setField(p+'-port',e.data.port);
+    setField(p+'-ssl',e.data.sslEnabled,true);
+    setField(p+'-user',e.data.user);
+    setField(p+'-password',e.data.password);
+    setField(p+'-catalog',e.data.catalog);
+    setField(p+'-schema',e.data.schema);
+    setField(p+'-database',e.data.database);
   }
   if(e.data.type==='runtimeStatus'){
     const info=RUNTIME_ENGINES[e.data.engine];

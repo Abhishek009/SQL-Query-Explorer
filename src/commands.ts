@@ -9,7 +9,7 @@ import { ResultsSurface, ResultsTabs } from './resultsView';
 import { QueryStatusProvider } from './queryStatus';
 import { QueryScope } from './queryScope';
 import { RunningQueryRegistry } from './runningQueries';
-import { ConnectionMessage, connectionFormHtml, isBrowseFileMessage, isCheckRuntimeMessage, isConnectionMessage, isCreateFileMessage, isInstallRuntimeMessage, parseMaxRows, validateConnection } from './connectionForm';
+import { ConnectionMessage, connectionFormHtml, isBrowseFileMessage, isCheckRuntimeMessage, isConnectionMessage, isCreateFileMessage, isExpandHostMessage, isInstallRuntimeMessage, parseMaxRows, validateConnection } from './connectionForm';
 import { createEmptyDatabase } from './engines/sqlite/sqliteClient';
 import { isSqliteInstalled, installSqlite } from './engines/sqlite/sqliteRuntime';
 import { createEmptyDuckdb } from './engines/duckdb/duckdbClient';
@@ -529,6 +529,23 @@ export async function showConnectionWindow(
     }, Boolean(existing), hasPassword);
 
     panel.webview.onDidReceiveMessage(async (message: unknown) => {
+        if (isExpandHostMessage(message)) {
+            const asConnectionMessage: ConnectionMessage = {
+                type: 'test', engine: message.engine, name: '', host: message.host, port: message.port,
+                sslEnabled: message.sslEnabled, sslVerify: true, user: message.user,
+                catalog: message.catalog, schema: message.schema, database: message.database,
+                file: '', maxRows: '', password: message.password, clearPassword: false, connect: false
+            };
+            const expanded = message.engine === 'supabase' ? expandPastedSupabaseUrl(asConnectionMessage)
+                : message.engine === 'mongodb' ? expandPastedMongoUrl(asConnectionMessage)
+                : expandPastedUrl(asConnectionMessage);
+            void panel.webview.postMessage({
+                type: 'hostExpanded', engine: message.engine, host: expanded.host, port: expanded.port,
+                sslEnabled: expanded.sslEnabled, user: expanded.user, password: expanded.password,
+                catalog: expanded.catalog, schema: expanded.schema, database: expanded.database
+            });
+            return;
+        }
         if (isBrowseFileMessage(message)) {
             const label = message.engine === 'sqlite' ? 'SQLite' : 'DuckDB';
             const extensions = message.engine === 'sqlite' ? ['db', 'sqlite', 'sqlite3', 'db3'] : ['duckdb', 'db'];
