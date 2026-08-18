@@ -64,7 +64,21 @@ export function mongodbConnection(overrides: Partial<StoredConnection> = {}): St
     };
 }
 
+export function mariadbConnection(overrides: Partial<StoredConnection> = {}): StoredConnection {
+    return {
+        id: randomUUID(),
+        name: 'test-mariadb',
+        type: 'mariadb',
+        url: `mariadb://${process.env.TEST_MARIADB_HOST}:${process.env.TEST_MARIADB_PORT}`,
+        user: process.env.TEST_MARIADB_USER ?? 'root',
+        catalog: process.env.TEST_MARIADB_DATABASE,
+        ssl: false,
+        ...overrides
+    };
+}
+
 export const hasTrinoEnv = Boolean(process.env.TEST_TRINO_HOST && process.env.TEST_TRINO_PORT);
 export const hasPostgresEnv = Boolean(process.env.TEST_PG_HOST && process.env.TEST_PG_PORT);
 export const hasMysqlEnv = Boolean(process.env.TEST_MYSQL_HOST && process.env.TEST_MYSQL_PORT);
 export const hasMongoEnv = Boolean(process.env.TEST_MONGO_HOST && process.env.TEST_MONGO_PORT);
+export const hasMariadbEnv = Boolean(process.env.TEST_MARIADB_HOST && process.env.TEST_MARIADB_PORT);

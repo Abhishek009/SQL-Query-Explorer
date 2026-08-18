@@ -6,10 +6,11 @@ import { sqliteFieldsHtml } from './engines/sqlite/sqliteConnectionFields';
 import { duckdbFieldsHtml } from './engines/duckdb/duckdbConnectionFields';
 import { mysqlFieldsHtml } from './engines/mysql/mysqlConnectionFields';
 import { mongodbFieldsHtml } from './engines/mongodb/mongodbConnectionFields';
+import { mariadbFieldsHtml } from './engines/mariadb/mariadbConnectionFields';
 
 export interface ConnectionFormData {
     name: string;
-    engine: 'trino' | 'postgres' | 'supabase' | 'sqlite' | 'duckdb' | 'mysql' | 'mongodb';
+    engine: 'trino' | 'postgres' | 'supabase' | 'sqlite' | 'duckdb' | 'mysql' | 'mongodb' | 'mariadb';
     host: string;
     port: string;
     sslEnabled: boolean;
@@ -125,6 +126,7 @@ export function connectionFormHtml(webview: vscode.Webview, values: ConnectionFo
     const duckdbValues = values.engine === 'duckdb' ? values : { ...BLANK, engine: 'duckdb' as const };
     const mysqlValues = values.engine === 'mysql' ? values : { ...BLANK, engine: 'mysql' as const };
     const mongodbValues = values.engine === 'mongodb' ? values : { ...BLANK, engine: 'mongodb' as const };
+    const mariadbValues = values.engine === 'mariadb' ? values : { ...BLANK, engine: 'mariadb' as const };
 
     const styles = `
 :root{--gap:12px;--radius:6px}
@@ -202,7 +204,8 @@ button:focus-visible{outline:2px solid var(--vscode-focusBorder,#2f7ce0);outline
     const isDuckdb = values.engine === 'duckdb';
     const isMysql = values.engine === 'mysql';
     const isMongodb = values.engine === 'mongodb';
-    const isTrino = !isPostgres && !isSupabase && !isSqlite && !isDuckdb && !isMysql && !isMongodb;
+    const isMariadb = values.engine === 'mariadb';
+    const isTrino = !isPostgres && !isSupabase && !isSqlite && !isDuckdb && !isMysql && !isMongodb && !isMariadb;
     const tab = (active: boolean) => active ? ' active' : '';
     const selected = (active: boolean) => active ? 'true' : 'false';
 
@@ -224,6 +227,7 @@ button:focus-visible{outline:2px solid var(--vscode-focusBorder,#2f7ce0);outline
     <button type="button" class="tab${tab(isDuckdb)}" data-pane="duckdb" data-engine="duckdb" role="tab" aria-selected="${selected(isDuckdb)}"><span class="tab-icon" style="background:#fff000;color:#000">D</span>DuckDB</button>
     <button type="button" class="tab${tab(isMysql)}" data-pane="mysql" data-engine="mysql" role="tab" aria-selected="${selected(isMysql)}"><span class="tab-icon" style="background:#00758f">M</span>MySQL</button>
     <button type="button" class="tab${tab(isMongodb)}" data-pane="mongodb" data-engine="mongodb" role="tab" aria-selected="${selected(isMongodb)}"><span class="tab-icon" style="background:#13aa52">🍃</span>MongoDB</button>
+    <button type="button" class="tab${tab(isMariadb)}" data-pane="mariadb" data-engine="mariadb" role="tab" aria-selected="${selected(isMariadb)}"><span class="tab-icon" style="background:#003545">🦭</span>MariaDB</button>
   </div>
   <form id="connection">
    <div class="pane${tab(isTrino)}" data-pane="trino">${trinoFieldsHtml(trinoValues, passwordHint, hasPassword)}
@@ -239,6 +243,8 @@ button:focus-visible{outline:2px solid var(--vscode-focusBorder,#2f7ce0);outline
    <div class="pane${tab(isMysql)}" data-pane="mysql">${mysqlFieldsHtml(mysqlValues, passwordHint, hasPassword)}
    </div>
    <div class="pane${tab(isMongodb)}" data-pane="mongodb">${mongodbFieldsHtml(mongodbValues, passwordHint, hasPassword)}
+   </div>
+   <div class="pane${tab(isMariadb)}" data-pane="mariadb">${mariadbFieldsHtml(mariadbValues, passwordHint, hasPassword)}
    </div>
    <div id="result" class="result" role="status"></div>
   </form>
@@ -317,7 +323,15 @@ function mongodbPayload(kind){
     catalog:'',schema:'',database:byId('g-database').value,
     maxRows:byId('g-maxRows').value,connect};
 }
-const payloadByEngine={postgres:postgresPayload,supabase:supabasePayload,sqlite:sqlitePayload,duckdb:duckdbPayload,mysql:mysqlPayload,mongodb:mongodbPayload,trino:trinoPayload};
+function mariadbPayload(kind){
+  const port=byId('a-port');
+  return {type:kind,engine:'mariadb',name:byId('a-name').value,host:byId('a-host').value,
+    port:port.value.trim()||port.placeholder,sslEnabled:byId('a-ssl').checked,sslVerify:true,user:byId('a-user').value,
+    password:byId('a-password').value,clearPassword:byId('a-clearPassword').checked,
+    catalog:'',schema:'',database:byId('a-database').value,
+    maxRows:byId('a-maxRows').value,connect};
+}
+const payloadByEngine={postgres:postgresPayload,supabase:supabasePayload,sqlite:sqlitePayload,duckdb:duckdbPayload,mysql:mysqlPayload,mongodb:mongodbPayload,mariadb:mariadbPayload,trino:trinoPayload};
 function payload(kind){ return payloadByEngine[engine](kind); }
 
 document.querySelectorAll('button[type=submit]').forEach(b=>b.addEventListener('click',()=>{connect=b.dataset.connect==='true';}));
@@ -416,7 +430,7 @@ window.addEventListener('message',e=>{
     byId(e.data.engine==='duckdb'?'d-file':'l-file').value=e.data.path;
   }
 });
-const focusIds={trino:'t-host',postgres:'p-host',supabase:'s-host',sqlite:'l-file',duckdb:'d-file',mysql:'m-host',mongodb:'g-host'};
+const focusIds={trino:'t-host',postgres:'p-host',supabase:'s-host',sqlite:'l-file',duckdb:'d-file',mysql:'m-host',mongodb:'g-host',mariadb:'a-host'};
 byId(focusIds[engine]).focus();`;
 
     return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Trino Connection</title><style>${styles}</style></head><body>${body}<script nonce="${nonce}">${script}</script></body></html>`;

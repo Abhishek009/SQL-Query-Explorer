@@ -15,10 +15,13 @@ function quoteIdent(identifier: string): string {
 const SYSTEM_DATABASES = new Set(['information_schema', 'mysql', 'performance_schema', 'sys']);
 
 /**
- * MySQL over mysql2. A "database" there is what Postgres calls a schema — one
- * connection can see every database on the server, unlike Postgres where each
- * one needs its own connection — but the shared catalog → schema → table shape
- * still needs three levels, so the schema level just repeats the catalog name.
+ * MySQL over mysql2 — and MariaDB too, since it speaks the same wire protocol
+ * mysql2 already understands, the same way PostgresClient serves Supabase
+ * without its own client class. A "database" here is what Postgres calls a
+ * schema — one connection can see every database on the server, unlike
+ * Postgres where each one needs its own connection — but the shared catalog →
+ * schema → table shape still needs three levels, so the schema level just
+ * repeats the catalog name.
  */
 export class MySqlClient implements SqlClient {
     /** One pool per database: queries need to run against a specific one. */
@@ -40,7 +43,8 @@ export class MySqlClient implements SqlClient {
 
     public async testConnection(): Promise<string> {
         const result = await this.run('SELECT VERSION()', 1);
-        return `MySQL ${String(result.rows[0]?.[0] ?? '')}`;
+        const label = this.connection.type === 'mariadb' ? 'MariaDB' : 'MySQL';
+        return `${label} ${String(result.rows[0]?.[0] ?? '')}`;
     }
 
     public async catalogs(): Promise<string[]> {

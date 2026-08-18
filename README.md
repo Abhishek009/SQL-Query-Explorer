@@ -2,7 +2,7 @@
 
 A VS Code extension for browsing database schemas and running SQL without leaving the editor.
 
-Supports **[Trino](https://trino.io)**, **[PostgreSQL](https://www.postgresql.org)**, **[Supabase](https://supabase.com)**, **[SQLite](https://www.sqlite.org)**, **[DuckDB](https://duckdb.org)**, **[MySQL](https://www.mysql.com)**, and **[MongoDB](https://www.mongodb.com)**. The explorer, results grid, and editor features are shared by all of them, so further engines slot in behind the same interface.
+Supports **[Trino](https://trino.io)**, **[PostgreSQL](https://www.postgresql.org)**, **[Supabase](https://supabase.com)**, **[SQLite](https://www.sqlite.org)**, **[DuckDB](https://duckdb.org)**, **[MySQL](https://www.mysql.com)**, **[MariaDB](https://mariadb.org)**, and **[MongoDB](https://www.mongodb.com)**. The explorer, results grid, and editor features are shared by all of them, so further engines slot in behind the same interface.
 
 ### Database support
 
@@ -14,13 +14,14 @@ Supports **[Trino](https://trino.io)**, **[PostgreSQL](https://www.postgresql.or
 | [SQLite](https://www.sqlite.org) | Supported |
 | [DuckDB](https://duckdb.org) | Supported |
 | [MySQL](https://www.mysql.com) | Supported |
+| [MariaDB](https://mariadb.org) | Supported |
 | [MongoDB](https://www.mongodb.com) | Supported |
 | [Snowflake](https://www.snowflake.com) | Not yet supported |
 
 ## Features
 
 ### Connections
-- **Pick the engine when adding a connection** — Trino, PostgreSQL, Supabase, SQLite, DuckDB, MySQL, or MongoDB — and the form shows only the fields that engine needs.
+- **Pick the engine when adding a connection** — Trino, PostgreSQL, Supabase, SQLite, DuckDB, MySQL, MariaDB, or MongoDB — and the form shows only the fields that engine needs.
 - **Test Connection** runs a real query against the details you typed, before saving anything.
 - **Manage several servers at once** — dev, staging, and production sit side by side in the **Connections** view. Add one with the **+** button, then edit, remove, or refresh each from its context menu.
 - One connection is **active** for queries at a time; right-click → **Use Connection for Queries** to switch.
@@ -30,10 +31,11 @@ Supports **[Trino](https://trino.io)**, **[PostgreSQL](https://www.postgresql.or
 - **SQLite** gets its own tab too, with nothing but a **Database file** field, native **Browse…**/**New Database…** pickers, and a one-time **Install** step — no host, port, user, password, or SSL, since it's a local file rather than a server. See [SQLite connections](#sqlite-connections).
 - **DuckDB** gets a tab with the same local-file shape and install step as SQLite — see [DuckDB connections](#duckdb-connections).
 - **MySQL** gets its own tab too — host/port/user/password/database/SSL, the same shape as PostgreSQL's. See [MySQL connections](#mysql-connections).
+- **MariaDB** gets its own tab as well, identical in shape to MySQL's and backed by the same client — it's the same wire protocol underneath. See [MariaDB connections](#mariadb-connections).
 - **MongoDB** gets its own tab too, and is the one engine here that doesn't speak SQL — the editor takes Mongo shell syntax instead (`db.collection.find({...})`). See [MongoDB connections](#mongodb-connections).
 - Passwords are stored in **VS Code Secret Storage**, never in `settings.json`.
-- Trino traffic goes through the `/v1/statement` REST endpoint; PostgreSQL, Supabase, MySQL, and MongoDB use their native wire protocols; SQLite and DuckDB open their file directly on disk.
-- For PostgreSQL, Supabase, MySQL, and MongoDB the tree's top level lists **databases** on the server, so siblings of the one you opened are browsable too. For SQLite and DuckDB the file itself is the only database, so the tree goes straight to its tables and views.
+- Trino traffic goes through the `/v1/statement` REST endpoint; PostgreSQL, Supabase, MySQL, MariaDB, and MongoDB use their native wire protocols; SQLite and DuckDB open their file directly on disk.
+- For PostgreSQL, Supabase, MySQL, MariaDB, and MongoDB the tree's top level lists **databases** on the server, so siblings of the one you opened are browsable too. For SQLite and DuckDB the file itself is the only database, so the tree goes straight to its tables and views.
 
 #### Connection URL formats
 
@@ -108,6 +110,15 @@ Details:
 - Table DDL is `SHOW CREATE TABLE`/`SHOW CREATE VIEW`'s literal output, like SQLite and DuckDB, not reassembled from catalog metadata.
 - Runs through [`mysql2`](https://www.npmjs.com/package/mysql2), a pure-JS driver with no native binary — bundled normally, no install-on-demand step like SQLite/DuckDB need.
 - Identifiers are quoted with backticks (MySQL's own convention), not the double quotes every other engine here uses.
+
+#### MariaDB connections
+
+MariaDB gets its own tab with the identical shape to MySQL's — host, port, username, password, an optional default database, and an SSL toggle, with the same blank-database-means-browse-everything behaviour.
+
+Details:
+- Runs through the exact same `MySqlClient`/[`mysql2`](https://www.npmjs.com/package/mysql2) code path as MySQL: mysql2 already speaks MariaDB's wire protocol, so there's no separate driver or client class, just a different tab and connection type — the same way Supabase reuses PostgreSQL's client.
+- **Test Connection** and query results correctly say "MariaDB", not "MySQL", reading it off the server's own version string rather than assuming.
+- Everything else — schema-repeats-database, backtick-quoted identifiers, `SHOW CREATE TABLE` DDL, multi-statement script support — is identical to [MySQL connections](#mysql-connections) above, since it's the same server family under the hood.
 
 #### MongoDB connections
 

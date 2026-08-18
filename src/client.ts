@@ -44,9 +44,9 @@ export interface SqlClient {
     testConnection(token?: vscode.CancellationToken): Promise<string>;
 }
 
-export type EngineId = 'trino' | 'postgres' | 'supabase' | 'sqlite' | 'duckdb' | 'mysql' | 'mongodb';
+export type EngineId = 'trino' | 'postgres' | 'supabase' | 'sqlite' | 'duckdb' | 'mysql' | 'mongodb' | 'mariadb';
 
-const NON_TRINO_TYPES = new Set<StoredConnection['type']>(['postgres', 'supabase', 'sqlite', 'duckdb', 'mysql', 'mongodb']);
+const NON_TRINO_TYPES = new Set<StoredConnection['type']>(['postgres', 'supabase', 'sqlite', 'duckdb', 'mysql', 'mongodb', 'mariadb']);
 
 /** Connections without a type predate Postgres support, so they are Trino. */
 export function engineOf(connection: StoredConnection): EngineId {
@@ -60,7 +60,8 @@ export const ENGINE_LABELS: Record<EngineId, string> = {
     sqlite: 'SQLite',
     duckdb: 'DuckDB',
     mysql: 'MySQL',
-    mongodb: 'MongoDB'
+    mongodb: 'MongoDB',
+    mariadb: 'MariaDB'
 };
 
 /** MongoDB speaks shell syntax, not SQL — commands built elsewhere need to know which to generate. */
@@ -84,7 +85,8 @@ export function createClient(
     switch (engineOf(connection)) {
         case 'sqlite': return new SqliteClient(secrets, connection, registry, password);
         case 'duckdb': return new DuckdbClient(secrets, connection);
-        case 'mysql': return new MySqlClient(secrets, connection, registry, password);
+        case 'mysql':
+        case 'mariadb': return new MySqlClient(secrets, connection, registry, password);
         case 'mongodb': return new MongodbClient(secrets, connection, registry, password);
         case 'postgres':
         case 'supabase': return new PostgresClient(secrets, connection, registry, password);

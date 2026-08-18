@@ -2,8 +2,8 @@
   "name": "trino-explorer",
   "displayName": "SQL Query Explorer",
   "publisher": "big-tech-talk",
-  "description": "Browse schemas and run queries from VS Code. Supports Trino, PostgreSQL, Supabase, SQLite, DuckDB, MySQL, and MongoDB.",
-  "version": "2.4.1",
+  "description": "Browse schemas and run queries from VS Code. Supports Trino, PostgreSQL, Supabase, SQLite, DuckDB, MySQL, MariaDB, and MongoDB.",
+  "version": "2.5.0",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -34,6 +34,7 @@
     "sqlite",
     "duckdb",
     "mysql",
+    "mariadb",
     "mongodb",
     "nosql"
   ],
@@ -199,13 +200,14 @@
                   "sqlite",
                   "duckdb",
                   "mysql",
-                  "mongodb"
+                  "mongodb",
+                  "mariadb"
                 ],
                 "description": "Engine this connection speaks. Absent means Trino."
               },
               "ssl": {
                 "type": "boolean",
-                "description": "PostgreSQL/Supabase/MySQL/MongoDB only: use TLS to reach the server."
+                "description": "PostgreSQL/Supabase/MySQL/MongoDB/MariaDB only: use TLS to reach the server."
               },
               "sslVerify": {
                 "type": "boolean",
