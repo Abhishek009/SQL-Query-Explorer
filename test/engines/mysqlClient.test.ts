@@ -97,4 +97,17 @@ describe.skipIf(!hasMysqlEnv)('MySqlClient (live server)', () => {
         expect(result.truncated).toBe(true);
         await MySqlClient.closeAll(connection.id);
     });
+
+    // Regression test: CSV import built its column list with the ANSI
+    // double-quote helper for every engine, which MySQL rejects outright.
+    // client.quoteIdentifier() is what importData.ts now calls instead.
+    it('accepts an INSERT column list built with quoteIdentifier(), and rejects the double-quoted form that used to be sent', async () => {
+        const columnList = ['id', 'name'].map(name => client.quoteIdentifier(name)).join(', ');
+        expect(columnList).toBe('`id`, `name`');
+        await expect(client.query(`INSERT INTO ${table} (${columnList}) VALUES (99, 'Zoe')`)).resolves.toBeTruthy();
+
+        const doubleQuoted = ['id', 'name'].map(name => `"${name}"`).join(', ');
+        await expect(client.query(`INSERT INTO ${table} (${doubleQuoted}) VALUES (100, 'Yara')`))
+            .rejects.toThrow(/syntax/i);
+    });
 });

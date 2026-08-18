@@ -29,6 +29,15 @@ export interface SqlClient {
     query(statement: string, token?: vscode.CancellationToken, database?: string): Promise<TrinoQueryResult>;
     /** How this engine writes a table reference: Trino qualifies by catalog, Postgres cannot. */
     qualify(catalog: string | undefined, schema: string | undefined, table: string | undefined): string;
+    /**
+     * How this engine quotes a single identifier — double quotes for every SQL
+     * engine here except MySQL/MariaDB, which use backticks; MongoDB has no SQL
+     * identifiers to quote at all, so it returns the name unchanged. Callers that
+     * build their own SQL text (import's column list, since it isn't a plain
+     * table reference `qualify()` already covers) need this to not hardcode one
+     * convention for every engine.
+     */
+    quoteIdentifier(identifier: string): string;
     /** A statement that works as the starting point for a blank query editor. */
     starterSql(): string;
     /**

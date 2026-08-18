@@ -144,6 +144,11 @@ export class MongodbClient implements SqlClient {
         return table ?? '';
     }
 
+    /** Field names go into a JS object literal, not quoted SQL, so there's nothing to quote. */
+    public quoteIdentifier(identifier: string): string {
+        return identifier;
+    }
+
     public starterSql(): string {
         return 'db.getCollectionNames()';
     }

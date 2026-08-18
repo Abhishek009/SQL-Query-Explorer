@@ -122,6 +122,10 @@ export class PostgresClient implements SqlClient {
         return [schema, table].filter(Boolean).map(part => quoteIdentifier(part!)).join('.');
     }
 
+    public quoteIdentifier(identifier: string): string {
+        return quoteIdentifier(identifier);
+    }
+
     public starterSql(): string {
         return 'SELECT table_schema, table_name\nFROM information_schema.tables\nWHERE table_schema NOT IN (\'pg_catalog\', \'information_schema\')\nORDER BY table_schema, table_name\nLIMIT 10;';
     }

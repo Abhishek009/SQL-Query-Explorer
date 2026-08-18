@@ -113,6 +113,10 @@ export class TrinoClient implements SqlClient {
         return [catalog, schema, table].filter(Boolean).map(part => quoteIdentifier(part!)).join('.');
     }
 
+    public quoteIdentifier(identifier: string): string {
+        return quoteIdentifier(identifier);
+    }
+
     public starterSql(): string {
         return 'SELECT *\nFROM system.runtime.nodes\nLIMIT 10;';
     }

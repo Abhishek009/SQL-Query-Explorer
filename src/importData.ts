@@ -5,7 +5,7 @@ import { ExplorerItem, TrinoExplorerProvider } from './explorer';
 import { RunningQueryRegistry } from './runningQueries';
 import { parseCsv } from './csv';
 import { importFormHtml, isImportMessage } from './importForm';
-import { quoteIdentifier, quoteLiteral, summarize } from './util';
+import { quoteLiteral, summarize } from './util';
 
 /** Rows per INSERT/insertMany batch — large enough to be fast, small enough that
  *  one statement never gets close to a coordinator's/driver's max-query-size limit. */
@@ -95,7 +95,7 @@ export async function importDataFromFile(
         if (!mapped.length) { return; }
 
         const qualified = client.qualify(catalog, schema, table);
-        const columnList = mapped.map(entry => quoteIdentifier(entry.column.name)).join(', ');
+        const columnList = mapped.map(entry => client.quoteIdentifier(entry.column.name)).join(', ');
         panel.dispose();
 
         let imported = 0;

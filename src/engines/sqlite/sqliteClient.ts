@@ -132,6 +132,10 @@ export class SqliteClient implements SqlClient {
         return [schema ?? 'main', table].filter(Boolean).map(part => quoteIdentifier(part!)).join('.');
     }
 
+    public quoteIdentifier(identifier: string): string {
+        return quoteIdentifier(identifier);
+    }
+
     public starterSql(): string {
         return "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name LIMIT 10;";
     }

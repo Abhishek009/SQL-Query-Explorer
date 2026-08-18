@@ -116,6 +116,10 @@ export class DuckdbClient implements SqlClient {
         return [schema ?? 'main', table].filter(Boolean).map(part => quoteIdentifier(part!)).join('.');
     }
 
+    public quoteIdentifier(identifier: string): string {
+        return quoteIdentifier(identifier);
+    }
+
     public starterSql(): string {
         return "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' ORDER BY table_name LIMIT 10;";
     }

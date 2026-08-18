@@ -133,6 +133,10 @@ export class MySqlClient implements SqlClient {
         return [catalog, table].filter(Boolean).map(part => quoteIdent(part!)).join('.');
     }
 
+    public quoteIdentifier(identifier: string): string {
+        return quoteIdent(identifier);
+    }
+
     public starterSql(): string {
         return 'SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE() ORDER BY table_name LIMIT 10;';
     }
