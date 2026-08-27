@@ -98,7 +98,8 @@ button:disabled:hover{background:transparent}
 .collist{display:flex;flex-direction:column;gap:5px;font-size:.9em}
 .colrow{display:flex;align-items:center;gap:7px;cursor:pointer}
 .expand-backdrop{position:fixed;inset:0;z-index:9}
-.expand{position:fixed;top:0;right:0;bottom:0;width:min(420px,90vw);z-index:10;background:var(--vscode-editor-background,#1f1f1f);border-left:1px solid var(--vscode-panel-border,rgba(128,128,128,.4));box-shadow:-4px 0 14px rgba(0,0,0,.25);display:flex;flex-direction:column;padding:10px 12px;box-sizing:border-box}
+.expand{position:fixed;top:0;right:0;bottom:0;width:min(420px,90vw);z-index:10;background:var(--vscode-editor-background,#1f1f1f);border-left:1px solid var(--vscode-panel-border,rgba(128,128,128,.4));box-shadow:-4px 0 14px rgba(0,0,0,.25);flex-direction:column;padding:10px 12px;box-sizing:border-box}
+.expand:not([hidden]){display:flex}
 .expand-head{display:flex;align-items:center;gap:6px;margin-bottom:8px;font-weight:600}
 .expand pre{flex:1 1 auto;overflow:auto;margin:0;padding:10px;white-space:pre-wrap;word-break:break-word;font-family:var(--vscode-editor-font-family,monospace);font-size:var(--vscode-editor-font-size,12px);background:var(--vscode-textCodeBlock-background,rgba(128,128,128,.12));border-radius:3px;user-select:text}
 .grip{position:absolute;top:0;right:0;width:7px;height:100%;cursor:col-resize;user-select:none}

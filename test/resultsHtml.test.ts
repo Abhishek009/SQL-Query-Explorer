@@ -139,6 +139,22 @@ describe('results grid: column visibility', () => {
 });
 
 describe('results grid: expand a cell', () => {
+    // Regression guard for a real bug: .expand{...display:flex...} is an
+    // *author* style, which overrides the browser's own `[hidden]{display:none}`
+    // default regardless of selector specificity — so the panel rendered open
+    // on every load even though its `hidden` attribute (and the .hidden DOM
+    // property jsdom can see) was correctly true. jsdom doesn't do real CSS
+    // cascade/rendering, so it can't directly prove the panel is *invisible* —
+    // this only proves the specific mistake (a bare, unconditional `display`
+    // on a selector that also carries `hidden`) isn't back in the stylesheet.
+    it('never sets display on the .expand panel except guarded by :not([hidden])', () => {
+        const { window } = renderInJsdom(buildState());
+        const css = [...window.document.querySelectorAll('style')].map(el => el.textContent).join('\n');
+        const bareRule = /\.expand\{[^}]*display:/;
+        expect(bareRule.test(css)).toBe(false);
+        expect(css).toContain('.expand:not([hidden]){display:flex}');
+    });
+
     it('shows the column name, row number, and raw value on double-click', () => {
         const { window } = renderInJsdom(buildState());
         const cell = window.document.querySelector('td[data-r="0"][data-c="1"]') as unknown as HTMLElement; // Alice
