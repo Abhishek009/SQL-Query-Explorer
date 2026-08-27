@@ -24,25 +24,25 @@ export function sqlResultsHtml(webview: vscode.Webview, state: ResultsState): st
     const format = (value: unknown) => value === null ? 'NULL' : typeof value === 'object' ? JSON.stringify(value) : String(value);
     const isNumeric = (value: unknown) => typeof value === 'number'
         || (typeof value === 'string' && value.trim() !== '' && /^-?\d+(\.\d+)?$/.test(value.trim()));
-    const cell = (value: unknown) => {
+    const cell = (value: unknown, row: number, column: number) => {
         const text = format(value);
         const classes = value === null || value === undefined ? 'nul' : isNumeric(value) ? 'num' : '';
         const title = text.length > 60 ? ` title="${escape(text)}"` : '';
-        return `<td class="${classes}"${title}>${escape(text)}</td>`;
+        return `<td class="${classes}" data-r="${row}" data-c="${column}"${title}>${escape(text)}</td>`;
     };
     const arrow = (index: number) => state.sort?.column === index ? (state.sort.direction === 'asc' ? ' ▲' : ' ▼') : '';
     const headers = `<th class="rownum"></th>${result.columns
         .map((column, index) => `<th class="sortable${state.sort?.column === index ? ' sorted' : ''}" data-col="${index}" title="Sort by ${escape(column)}">${escape(column)}<span class="arrow">${arrow(index)}</span></th>`)
         .join('')}`;
     const rows = displayedRows
-        .map((row, index) => `<tr><th class="rownum">${index + 1}</th>${result.columns.map((_, column) => cell(row[column])).join('')}</tr>`)
+        .map((row, rowIndex) => `<tr><th class="rownum">${rowIndex + 1}</th>${result.columns.map((_, column) => cell(row[column], rowIndex, column)).join('')}</tr>`)
         .join('');
     const fetched = result.rows.length;
     const note = state.subtitle ?? (fetched > displayedRows.length
         ? `${displayedRows.length.toLocaleString()} of ${fetched.toLocaleString()} rows`
         : `${fetched.toLocaleString()} row(s)`);
     const table = result.columns.length
-        ? `<div class="results"><table><thead><tr>${headers}</tr></thead><tbody>${rows}</tbody></table></div>`
+        ? `<div class="results"><table title="Click a cell to copy it • Shift+click to copy a range"><thead><tr>${headers}</tr></thead><tbody>${rows}</tbody></table></div>`
         : '<p>Statement completed. No rows returned.</p>';
     const info = [
         ['Connection', `${connection.name} (${connection.url})`],
@@ -58,7 +58,7 @@ export function sqlResultsHtml(webview: vscode.Webview, state: ResultsState): st
     const capBanner = result.truncated
         ? `<div class="banner">Stopped at the ${(result.maxRows ?? fetched).toLocaleString()} row cap — the query had more rows. Raise <code>trino.query.maxRows</code>, or set a per-connection limit, to fetch more.</div>`
         : '';
-    const toolbar = `<div class="bar"><span class="note"><b>${escape(connection.name)}</b> — ${note} · ${formatDuration(state.milliseconds)}</span><span class="spacer"></span><label for="limit">Limit</label><input id="limit" type="number" min="1" max="10000" step="50" value="${limit}" title="Maximum rows to display"><button id="info-toggle" class="ghost" title="Show query details">Info</button><button id="csv" title="Export displayed rows as CSV">CSV</button><button id="tsv" title="Export displayed rows as TSV">TSV</button></div>${capBanner}${infoPanel}`;
+    const toolbar = `<div class="bar"><span class="note"><b>${escape(connection.name)}</b> — <span id="rowcount">${note}</span> · ${formatDuration(state.milliseconds)}</span><span class="spacer"></span><input id="filter" type="search" placeholder="Filter rows…" title="Filter the rows shown below — does not affect CSV/TSV export" data-total="${displayedRows.length}" data-note="${escape(note)}"><label for="limit">Limit</label><input id="limit" type="number" min="1" max="10000" step="50" value="${limit}" title="Maximum rows to display"><button id="info-toggle" class="ghost" title="Show query details">Info</button><button id="csv" title="Export displayed rows as CSV">CSV</button><button id="tsv" title="Export displayed rows as TSV">TSV</button></div>${capBanner}${infoPanel}`;
     return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>html,body{height:100%}body{display:flex;flex-direction:column;color:var(--vscode-foreground);font-family:var(--vscode-font-family);margin:0;padding:8px 12px;box-sizing:border-box;overflow:hidden}.bar{flex:0 0 auto;display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap}.spacer{flex:1 1 auto}.note{color:var(--vscode-descriptionForeground);font-size:.9em}label{font-size:.9em;color:var(--vscode-descriptionForeground)}input{width:74px;padding:3px 6px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,rgba(128,128,128,.55));border-radius:2px}button{padding:3px 10px;color:var(--vscode-button-foreground);background:var(--vscode-button-background);border:0;border-radius:2px;cursor:pointer}button:hover{background:var(--vscode-button-hoverBackground)}
 button.ghost{background:transparent;color:var(--vscode-foreground);border:1px solid var(--vscode-panel-border,rgba(128,128,128,.45))}
 button.ghost:hover{background:var(--vscode-toolbar-hoverBackground,rgba(128,128,128,.18))}
@@ -87,8 +87,67 @@ thead .rownum{z-index:3}
 .grip{position:absolute;top:0;right:0;width:7px;height:100%;cursor:col-resize;user-select:none}
 .grip:hover,.grip.active{background:var(--vscode-focusBorder,rgba(128,128,128,.7))}
 td.num{text-align:right;font-family:var(--vscode-editor-font-family,monospace);font-variant-numeric:tabular-nums}
-td.nul{color:var(--vscode-descriptionForeground);font-style:italic;opacity:.75}</style></head><body>${toolbar}${table}<script nonce="${nonce}">const vscode=acquireVsCodeApi();const box=document.getElementById('limit');const send=()=>{const v=Number(box.value);if(Number.isFinite(v)&&v>0)vscode.postMessage({type:'limit',value:v});};box.addEventListener('change',send);box.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();send();}});document.getElementById('csv').addEventListener('click',()=>vscode.postMessage({type:'download',format:'csv'}));document.getElementById('tsv').addEventListener('click',()=>vscode.postMessage({type:'download',format:'tsv'}));
+td.nul{color:var(--vscode-descriptionForeground);font-style:italic;opacity:.75}
+tbody td{cursor:pointer;user-select:none;transition:background-color .35s ease}
+td.selected{background:var(--vscode-editor-selectionBackground,rgba(51,153,255,.35))!important;outline:1px solid var(--vscode-focusBorder,#2f7ce0);outline-offset:-1px}
+td.copied{background:var(--vscode-testing-iconPassed,#2ea043)!important;color:#fff}
+#filter{width:150px}</style></head><body>${toolbar}${table}<script nonce="${nonce}">const vscode=acquireVsCodeApi();const box=document.getElementById('limit');const send=()=>{const v=Number(box.value);if(Number.isFinite(v)&&v>0)vscode.postMessage({type:'limit',value:v});};box.addEventListener('change',send);box.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();send();}});document.getElementById('csv').addEventListener('click',()=>vscode.postMessage({type:'download',format:'csv'}));document.getElementById('tsv').addEventListener('click',()=>vscode.postMessage({type:'download',format:'tsv'}));
 const info=document.getElementById('info');document.getElementById('info-toggle').addEventListener('click',()=>{info.hidden=!info.hidden;});
 document.querySelectorAll('thead th.sortable').forEach(th=>{th.addEventListener('click',e=>{if(e.target.classList.contains('grip'))return;vscode.postMessage({type:'sort',value:Number(th.dataset.col)});});});
-document.querySelectorAll('thead th:not(.rownum)').forEach(th=>{const grip=document.createElement('span');grip.className='grip';th.appendChild(grip);grip.addEventListener('mousedown',e=>{e.preventDefault();e.stopPropagation();const startX=e.clientX;const startWidth=th.offsetWidth;grip.classList.add('active');document.body.style.cursor='col-resize';const move=ev=>{const width=Math.max(48,startWidth+ev.clientX-startX);th.style.width=width+'px';th.style.minWidth=width+'px';th.style.maxWidth=width+'px';};const stop=()=>{grip.classList.remove('active');document.body.style.cursor='';document.removeEventListener('mousemove',move);document.removeEventListener('mouseup',stop);};document.addEventListener('mousemove',move);document.addEventListener('mouseup',stop);});grip.addEventListener('dblclick',e=>{e.preventDefault();th.style.width='';th.style.minWidth='';th.style.maxWidth='';});});</script></body></html>`;
+document.querySelectorAll('thead th:not(.rownum)').forEach(th=>{const grip=document.createElement('span');grip.className='grip';th.appendChild(grip);grip.addEventListener('mousedown',e=>{e.preventDefault();e.stopPropagation();const startX=e.clientX;const startWidth=th.offsetWidth;grip.classList.add('active');document.body.style.cursor='col-resize';const move=ev=>{const width=Math.max(48,startWidth+ev.clientX-startX);th.style.width=width+'px';th.style.minWidth=width+'px';th.style.maxWidth=width+'px';};const stop=()=>{grip.classList.remove('active');document.body.style.cursor='';document.removeEventListener('mousemove',move);document.removeEventListener('mouseup',stop);};document.addEventListener('mousemove',move);document.addEventListener('mouseup',stop);});grip.addEventListener('dblclick',e=>{e.preventDefault();th.style.width='';th.style.minWidth='';th.style.maxWidth='';});});
+const filterBox=document.getElementById('filter');
+if(filterBox){
+  const rowcount=document.getElementById('rowcount');
+  filterBox.addEventListener('input',()=>{
+    const q=filterBox.value.trim().toLowerCase();
+    let visible=0;
+    document.querySelectorAll('tbody tr').forEach(tr=>{
+      let text='';
+      tr.querySelectorAll('td').forEach(td=>{text+=td.textContent+' ';});
+      const match=!q||text.toLowerCase().includes(q);
+      tr.style.display=match?'':'none';
+      if(match)visible++;
+    });
+    rowcount.textContent=q?visible.toLocaleString()+' of '+filterBox.dataset.total+' rows match':filterBox.dataset.note;
+  });
+}
+function copyText(text){
+  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).catch(()=>fallbackCopy(text));}
+  else{fallbackCopy(text);}
+}
+function fallbackCopy(text){
+  const ta=document.createElement('textarea');
+  ta.value=text;ta.style.position='fixed';ta.style.opacity='0';
+  document.body.appendChild(ta);ta.focus();ta.select();
+  try{document.execCommand('copy');}catch(e){}
+  document.body.removeChild(ta);
+}
+function flash(cells){cells.forEach(td=>td.classList.add('copied'));setTimeout(()=>cells.forEach(td=>td.classList.remove('copied')),400);}
+let anchorCell=null;
+document.querySelectorAll('tbody td').forEach(td=>{
+  td.addEventListener('click',e=>{
+    const r=Number(td.dataset.r),c=Number(td.dataset.c);
+    document.querySelectorAll('td.selected').forEach(el=>el.classList.remove('selected'));
+    if(e.shiftKey&&anchorCell){
+      const ar=Number(anchorCell.dataset.r),ac=Number(anchorCell.dataset.c);
+      const r0=Math.min(ar,r),r1=Math.max(ar,r),c0=Math.min(ac,c),c1=Math.max(ac,c);
+      const rangeCells=[],lines=[];
+      for(let rr=r0;rr<=r1;rr++){
+        const line=[];
+        for(let cc=c0;cc<=c1;cc++){
+          const cellEl=document.querySelector('td[data-r="'+rr+'"][data-c="'+cc+'"]');
+          if(cellEl){rangeCells.push(cellEl);cellEl.classList.add('selected');line.push(cellEl.textContent);}
+        }
+        lines.push(line.join('\\t'));
+      }
+      copyText(lines.join('\\n'));
+      flash(rangeCells);
+    } else {
+      anchorCell=td;
+      td.classList.add('selected');
+      copyText(td.textContent);
+      flash([td]);
+    }
+  });
+});</script></body></html>`;
 }
