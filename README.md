@@ -195,6 +195,11 @@ Results open in an editor tab beside your query. `Run` reuses one tab; `New Tab`
 
 - **Sortable columns** — click a header to cycle ascending → descending → unsorted. Numbers sort numerically, text case-insensitively, and NULLs always sort last.
 - **Resizable columns** — drag a header edge; double-click it to reset.
+- **Click a cell to copy it** to the clipboard, with a brief flash for feedback; **Shift+click a second cell** to select a rectangular range and copy it as TSV, spreadsheet-style.
+- **Double-click a cell to expand it** into a side panel — a JSON/object value is pretty-printed rather than shown as the compact single-line form the grid uses inline. Closes on Escape, the ✕ button, or clicking outside it.
+- **Filter box** hides rows that don't match what you type, across every column — display-only, so it never changes what CSV/TSV/INSERT export sends.
+- **Columns button** toggles which columns are shown, for a wide result set — hidden columns stay out of the way visually but are never dropped from export.
+- **Select rows (click a row number; Shift/Cmd+click for several) and copy them as INSERT statements** — or, for a MongoDB connection, as a `db.<collection>.insertMany([...])` call — handy for seeding another table or environment with a few rows. Column identifiers are quoted the way the source engine requires (backticks for MySQL/MariaDB, double quotes elsewhere); the table/collection name is read off the query's own `FROM`/`db.<name>.` — check it before running the copied statement elsewhere.
 - **Row limit box** — defaults to 100. For table previews, raising it re-queries Trino for more rows.
 - **Export to CSV or TSV**, honouring the current sort and limit. CSV uses RFC 4180 quoting; TSV collapses tabs and newlines.
 - **Info** shows the connection, user, timestamp, duration, row counts, column count, sort order, and the statement that ran.

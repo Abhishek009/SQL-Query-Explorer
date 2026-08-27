@@ -107,3 +107,110 @@ describe('results grid: quick filter', () => {
         expect((rows[1] as HTMLElement).style.display).toBe('none');
     });
 });
+
+describe('results grid: column visibility', () => {
+    it('adds a hide rule for a column when its checkbox is unchecked', () => {
+        const { window } = renderInJsdom(buildState());
+        const checkbox = window.document.querySelector('#columns-panel input[data-col="1"]') as unknown as HTMLInputElement;
+        checkbox.checked = false;
+        checkbox.dispatchEvent(new window.Event('change', { bubbles: true }));
+        const injected = [...window.document.querySelectorAll('style')].map(el => el.textContent).join('');
+        expect(injected).toContain('th[data-col="1"]');
+        expect(injected).toContain('td[data-c="1"]');
+    });
+
+    it('removes the hide rule again once re-checked', () => {
+        const { window } = renderInJsdom(buildState());
+        const checkbox = window.document.querySelector('#columns-panel input[data-col="1"]') as unknown as HTMLInputElement;
+        checkbox.checked = false;
+        checkbox.dispatchEvent(new window.Event('change', { bubbles: true }));
+        checkbox.checked = true;
+        checkbox.dispatchEvent(new window.Event('change', { bubbles: true }));
+        const injected = [...window.document.querySelectorAll('style')].map(el => el.textContent).join('');
+        expect(injected).not.toContain('data-col="1"');
+    });
+
+    it('lists one checkbox per column, all checked by default', () => {
+        const { window } = renderInJsdom(buildState());
+        const checkboxes = window.document.querySelectorAll('#columns-panel input[type="checkbox"]');
+        expect(checkboxes.length).toBe(2); // id, name
+        checkboxes.forEach(cb => expect((cb as unknown as HTMLInputElement).checked).toBe(true));
+    });
+});
+
+describe('results grid: expand a cell', () => {
+    it('shows the column name, row number, and raw value on double-click', () => {
+        const { window } = renderInJsdom(buildState());
+        const cell = window.document.querySelector('td[data-r="0"][data-c="1"]') as unknown as HTMLElement; // Alice
+        cell.dispatchEvent(new window.MouseEvent('dblclick', { bubbles: true }));
+        expect((window.document.getElementById('expand-panel') as unknown as HTMLElement).hidden).toBe(false);
+        expect(window.document.getElementById('expand-title')!.textContent).toBe('name · row 1');
+        expect(window.document.getElementById('expand-body')!.textContent).toBe('Alice');
+    });
+
+    it('pretty-prints a JSON object cell instead of showing the compact form', () => {
+        const state = buildState();
+        state.result.columns = [...state.result.columns, 'meta'];
+        state.result.rows = state.result.rows.map(row => [...row, { a: 1, b: [1, 2] }]);
+        const { window } = renderInJsdom(state);
+        const cell = window.document.querySelector('td[data-r="0"][data-c="2"]') as unknown as HTMLElement;
+        cell.dispatchEvent(new window.MouseEvent('dblclick', { bubbles: true }));
+        expect(window.document.getElementById('expand-body')!.textContent).toBe(JSON.stringify({ a: 1, b: [1, 2] }, null, 2));
+    });
+
+    it('closes on Escape and via the close button', () => {
+        const { window } = renderInJsdom(buildState());
+        const cell = window.document.querySelector('td[data-r="0"][data-c="1"]') as unknown as HTMLElement;
+        cell.dispatchEvent(new window.MouseEvent('dblclick', { bubbles: true }));
+        window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        expect((window.document.getElementById('expand-panel') as unknown as HTMLElement).hidden).toBe(true);
+
+        cell.dispatchEvent(new window.MouseEvent('dblclick', { bubbles: true }));
+        (window.document.getElementById('expand-close') as unknown as HTMLElement).dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+        expect((window.document.getElementById('expand-panel') as unknown as HTMLElement).hidden).toBe(true);
+    });
+});
+
+describe('results grid: row selection and Copy as INSERT', () => {
+    it('selects a row on click and enables the button', () => {
+        const { window } = renderInJsdom(buildState());
+        const rownum = window.document.querySelector('tbody tr[data-row="0"] th.rownum') as unknown as HTMLElement;
+        rownum.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+        expect((window.document.querySelector('tbody tr[data-row="0"]') as unknown as HTMLElement).classList.contains('row-selected')).toBe(true);
+        expect((window.document.getElementById('copy-insert') as unknown as HTMLButtonElement).disabled).toBe(false);
+    });
+
+    it('the button starts disabled with nothing selected', () => {
+        const { window } = renderInJsdom(buildState());
+        expect((window.document.getElementById('copy-insert') as unknown as HTMLButtonElement).disabled).toBe(true);
+    });
+
+    it('extends the selection with shift+click and posts sorted row indices', () => {
+        const { window, posted } = renderInJsdom(buildState());
+        const row0 = window.document.querySelector('tbody tr[data-row="0"] th.rownum') as unknown as HTMLElement;
+        const row2 = window.document.querySelector('tbody tr[data-row="2"] th.rownum') as unknown as HTMLElement;
+        row0.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+        row2.dispatchEvent(new window.MouseEvent('click', { bubbles: true, shiftKey: true }));
+        (window.document.getElementById('copy-insert') as unknown as HTMLElement).dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+        expect(posted).toEqual([{ type: 'copyInsert', rows: [0, 1, 2] }]);
+    });
+
+    it('ctrl/cmd+click toggles one row without clearing the rest', () => {
+        const { window, posted } = renderInJsdom(buildState());
+        const row0 = window.document.querySelector('tbody tr[data-row="0"] th.rownum') as unknown as HTMLElement;
+        const row2 = window.document.querySelector('tbody tr[data-row="2"] th.rownum') as unknown as HTMLElement;
+        row0.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+        row2.dispatchEvent(new window.MouseEvent('click', { bubbles: true, ctrlKey: true }));
+        (window.document.getElementById('copy-insert') as unknown as HTMLElement).dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+        expect(posted).toEqual([{ type: 'copyInsert', rows: [0, 2] }]);
+    });
+
+    it('labels the button for the connection\'s dialect', () => {
+        const sqlState = buildState();
+        expect(renderInJsdom(sqlState).window.document.getElementById('copy-insert')!.textContent).toBe('Copy as INSERT');
+
+        const mongoState = buildState();
+        mongoState.connection = { ...mongoState.connection, type: 'mongodb' };
+        expect(renderInJsdom(mongoState).window.document.getElementById('copy-insert')!.textContent).toBe('Copy as insertMany()');
+    });
+});

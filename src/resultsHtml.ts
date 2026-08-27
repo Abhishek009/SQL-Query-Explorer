@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { ErrorState, ResultsState } from './types';
 import { visibleRows } from './sorting';
 import { formatDuration } from './util';
+import { engineOf, speaksSql } from './client';
 
 export function emptyResultsHtml(webview: vscode.Webview): string {
     return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline';"></head><body style="color:var(--vscode-descriptionForeground);font-family:var(--vscode-font-family);padding:14px">Run a query to see results here.</body></html>`;
@@ -35,14 +36,14 @@ export function sqlResultsHtml(webview: vscode.Webview, state: ResultsState): st
         .map((column, index) => `<th class="sortable${state.sort?.column === index ? ' sorted' : ''}" data-col="${index}" title="Sort by ${escape(column)}">${escape(column)}<span class="arrow">${arrow(index)}</span></th>`)
         .join('')}`;
     const rows = displayedRows
-        .map((row, rowIndex) => `<tr><th class="rownum">${rowIndex + 1}</th>${result.columns.map((_, column) => cell(row[column], rowIndex, column)).join('')}</tr>`)
+        .map((row, rowIndex) => `<tr data-row="${rowIndex}"><th class="rownum" title="Click to select this row; Shift/Cmd+click to select several">${rowIndex + 1}</th>${result.columns.map((_, column) => cell(row[column], rowIndex, column)).join('')}</tr>`)
         .join('');
     const fetched = result.rows.length;
     const note = state.subtitle ?? (fetched > displayedRows.length
         ? `${displayedRows.length.toLocaleString()} of ${fetched.toLocaleString()} rows`
         : `${fetched.toLocaleString()} row(s)`);
     const table = result.columns.length
-        ? `<div class="results"><table title="Click a cell to copy it • Shift+click to copy a range"><thead><tr>${headers}</tr></thead><tbody>${rows}</tbody></table></div>`
+        ? `<div class="results"><table title="Click a cell to copy it • Shift+click to copy a range • Double-click to expand it"><thead><tr>${headers}</tr></thead><tbody>${rows}</tbody></table></div>`
         : '<p>Statement completed. No rows returned.</p>';
     const info = [
         ['Connection', `${connection.name} (${connection.url})`],
@@ -55,10 +56,16 @@ export function sqlResultsHtml(webview: vscode.Webview, state: ResultsState): st
         ['Sorted by', state.sort ? `${result.columns[state.sort.column]} ${state.sort.direction === 'asc' ? 'ascending' : 'descending'}` : 'none']
     ].map(([label, value]) => `<dt>${escape(label)}</dt><dd>${escape(value)}</dd>`).join('');
     const infoPanel = `<div id="info" class="info" hidden><dl>${info}</dl>${state.sql ? `<div class="sqlwrap"><div class="sqllabel">Statement</div><pre>${escape(state.sql)}</pre></div>` : ''}</div>`;
+    const columnsPanel = `<div id="columns-panel" class="info" hidden><div class="collist">${result.columns
+        .map((column, index) => `<label class="colrow"><input type="checkbox" checked data-col="${index}"> ${escape(column)}</label>`)
+        .join('')}</div></div>`;
+    const isSql = speaksSql(engineOf(connection));
+    const insertLabel = isSql ? 'Copy as INSERT' : 'Copy as insertMany()';
+    const insertTitle = `Select rows (click a row number; Shift/Cmd+click to select several), then copy them as ${isSql ? 'an INSERT statement' : 'a MongoDB insertMany() call'}`;
     const capBanner = result.truncated
         ? `<div class="banner">Stopped at the ${(result.maxRows ?? fetched).toLocaleString()} row cap — the query had more rows. Raise <code>trino.query.maxRows</code>, or set a per-connection limit, to fetch more.</div>`
         : '';
-    const toolbar = `<div class="bar"><span class="note"><b>${escape(connection.name)}</b> — <span id="rowcount">${note}</span> · ${formatDuration(state.milliseconds)}</span><span class="spacer"></span><input id="filter" type="search" placeholder="Filter rows…" title="Filter the rows shown below — does not affect CSV/TSV export" data-total="${displayedRows.length}" data-note="${escape(note)}"><label for="limit">Limit</label><input id="limit" type="number" min="1" max="10000" step="50" value="${limit}" title="Maximum rows to display"><button id="info-toggle" class="ghost" title="Show query details">Info</button><button id="csv" title="Export displayed rows as CSV">CSV</button><button id="tsv" title="Export displayed rows as TSV">TSV</button></div>${capBanner}${infoPanel}`;
+    const toolbar = `<div class="bar"><span class="note"><b>${escape(connection.name)}</b> — <span id="rowcount">${note}</span> · ${formatDuration(state.milliseconds)}</span><span class="spacer"></span><input id="filter" type="search" placeholder="Filter rows…" title="Filter the rows shown below — does not affect CSV/TSV export" data-total="${displayedRows.length}" data-note="${escape(note)}"><label for="limit">Limit</label><input id="limit" type="number" min="1" max="10000" step="50" value="${limit}" title="Maximum rows to display"><button id="columns-toggle" class="ghost" title="Show or hide columns">Columns</button><button id="copy-insert" class="ghost" disabled title="${escape(insertTitle)}">${insertLabel}</button><button id="info-toggle" class="ghost" title="Show query details">Info</button><button id="csv" title="Export displayed rows as CSV">CSV</button><button id="tsv" title="Export displayed rows as TSV">TSV</button></div>${capBanner}${infoPanel}${columnsPanel}<div id="expand-backdrop" class="expand-backdrop" hidden></div><div id="expand-panel" class="expand" hidden><div class="expand-head"><span id="expand-title"></span><span class="spacer"></span><button id="expand-copy" class="ghost" title="Copy">Copy</button><button id="expand-close" class="ghost" title="Close">✕</button></div><pre id="expand-body"></pre></div>`;
     return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>html,body{height:100%}body{display:flex;flex-direction:column;color:var(--vscode-foreground);font-family:var(--vscode-font-family);margin:0;padding:8px 12px;box-sizing:border-box;overflow:hidden}.bar{flex:0 0 auto;display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap}.spacer{flex:1 1 auto}.note{color:var(--vscode-descriptionForeground);font-size:.9em}label{font-size:.9em;color:var(--vscode-descriptionForeground)}input{width:74px;padding:3px 6px;color:var(--vscode-input-foreground);background:var(--vscode-input-background);border:1px solid var(--vscode-input-border,rgba(128,128,128,.55));border-radius:2px}button{padding:3px 10px;color:var(--vscode-button-foreground);background:var(--vscode-button-background);border:0;border-radius:2px;cursor:pointer}button:hover{background:var(--vscode-button-hoverBackground)}
 button.ghost{background:transparent;color:var(--vscode-foreground);border:1px solid var(--vscode-panel-border,rgba(128,128,128,.45))}
 button.ghost:hover{background:var(--vscode-toolbar-hoverBackground,rgba(128,128,128,.18))}
@@ -84,6 +91,16 @@ tbody tr:hover{background:var(--vscode-list-hoverBackground,rgba(128,128,128,.13
 tbody tr:last-child td,tbody tr:last-child th{border-bottom:0}
 .rownum{position:sticky;left:0;z-index:1;width:1%;white-space:nowrap;background-color:var(--vscode-panel-background,var(--vscode-editor-background,#1f1f1f));background-clip:padding-box;color:var(--vscode-editorLineNumber-foreground,rgba(128,128,128,.8));font-weight:400;text-align:right;padding:5px 8px;user-select:none;box-shadow:1px 0 0 var(--vscode-panel-border,rgba(128,128,128,.3));font-variant-numeric:tabular-nums}
 thead .rownum{z-index:3}
+tbody .rownum{cursor:pointer}
+tr.row-selected td,tr.row-selected th.rownum{background-color:var(--vscode-list-inactiveSelectionBackground,rgba(51,153,255,.16))!important}
+button:disabled{opacity:.5;cursor:default}
+button:disabled:hover{background:transparent}
+.collist{display:flex;flex-direction:column;gap:5px;font-size:.9em}
+.colrow{display:flex;align-items:center;gap:7px;cursor:pointer}
+.expand-backdrop{position:fixed;inset:0;z-index:9}
+.expand{position:fixed;top:0;right:0;bottom:0;width:min(420px,90vw);z-index:10;background:var(--vscode-editor-background,#1f1f1f);border-left:1px solid var(--vscode-panel-border,rgba(128,128,128,.4));box-shadow:-4px 0 14px rgba(0,0,0,.25);display:flex;flex-direction:column;padding:10px 12px;box-sizing:border-box}
+.expand-head{display:flex;align-items:center;gap:6px;margin-bottom:8px;font-weight:600}
+.expand pre{flex:1 1 auto;overflow:auto;margin:0;padding:10px;white-space:pre-wrap;word-break:break-word;font-family:var(--vscode-editor-font-family,monospace);font-size:var(--vscode-editor-font-size,12px);background:var(--vscode-textCodeBlock-background,rgba(128,128,128,.12));border-radius:3px;user-select:text}
 .grip{position:absolute;top:0;right:0;width:7px;height:100%;cursor:col-resize;user-select:none}
 .grip:hover,.grip.active{background:var(--vscode-focusBorder,rgba(128,128,128,.7))}
 td.num{text-align:right;font-family:var(--vscode-editor-font-family,monospace);font-variant-numeric:tabular-nums}
@@ -92,7 +109,9 @@ tbody td{cursor:pointer;user-select:none;transition:background-color .35s ease}
 td.selected{background:var(--vscode-editor-selectionBackground,rgba(51,153,255,.35))!important;outline:1px solid var(--vscode-focusBorder,#2f7ce0);outline-offset:-1px}
 td.copied{background:var(--vscode-testing-iconPassed,#2ea043)!important;color:#fff}
 #filter{width:150px}</style></head><body>${toolbar}${table}<script nonce="${nonce}">const vscode=acquireVsCodeApi();const box=document.getElementById('limit');const send=()=>{const v=Number(box.value);if(Number.isFinite(v)&&v>0)vscode.postMessage({type:'limit',value:v});};box.addEventListener('change',send);box.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();send();}});document.getElementById('csv').addEventListener('click',()=>vscode.postMessage({type:'download',format:'csv'}));document.getElementById('tsv').addEventListener('click',()=>vscode.postMessage({type:'download',format:'tsv'}));
-const info=document.getElementById('info');document.getElementById('info-toggle').addEventListener('click',()=>{info.hidden=!info.hidden;});
+const info=document.getElementById('info');const columnsPanel=document.getElementById('columns-panel');
+document.getElementById('info-toggle').addEventListener('click',()=>{const open=info.hidden;info.hidden=!open;if(open)columnsPanel.hidden=true;});
+document.getElementById('columns-toggle').addEventListener('click',()=>{const open=columnsPanel.hidden;columnsPanel.hidden=!open;if(open)info.hidden=true;});
 document.querySelectorAll('thead th.sortable').forEach(th=>{th.addEventListener('click',e=>{if(e.target.classList.contains('grip'))return;vscode.postMessage({type:'sort',value:Number(th.dataset.col)});});});
 document.querySelectorAll('thead th:not(.rownum)').forEach(th=>{const grip=document.createElement('span');grip.className='grip';th.appendChild(grip);grip.addEventListener('mousedown',e=>{e.preventDefault();e.stopPropagation();const startX=e.clientX;const startWidth=th.offsetWidth;grip.classList.add('active');document.body.style.cursor='col-resize';const move=ev=>{const width=Math.max(48,startWidth+ev.clientX-startX);th.style.width=width+'px';th.style.minWidth=width+'px';th.style.maxWidth=width+'px';};const stop=()=>{grip.classList.remove('active');document.body.style.cursor='';document.removeEventListener('mousemove',move);document.removeEventListener('mouseup',stop);};document.addEventListener('mousemove',move);document.addEventListener('mouseup',stop);});grip.addEventListener('dblclick',e=>{e.preventDefault();th.style.width='';th.style.minWidth='';th.style.maxWidth='';});});
 const filterBox=document.getElementById('filter');
@@ -148,6 +167,58 @@ document.querySelectorAll('tbody td').forEach(td=>{
       copyText(td.textContent);
       flash([td]);
     }
+  });
+});
+const colStyle=document.createElement('style');document.head.appendChild(colStyle);
+function updateColStyle(){
+  const hidden=[...document.querySelectorAll('#columns-panel input:not(:checked)')].map(cb=>cb.dataset.col);
+  colStyle.textContent=hidden.map(i=>'th[data-col="'+i+'"],td[data-c="'+i+'"]{display:none}').join('');
+}
+document.querySelectorAll('#columns-panel input').forEach(cb=>cb.addEventListener('change',updateColStyle));
+let selectedRows=new Set();
+let lastRowClicked=null;
+const copyInsertBtn=document.getElementById('copy-insert');
+function paintRowSelection(){
+  document.querySelectorAll('tbody tr').forEach(tr=>{tr.classList.toggle('row-selected',selectedRows.has(Number(tr.dataset.row)));});
+  copyInsertBtn.disabled=selectedRows.size===0;
+}
+document.querySelectorAll('tbody th.rownum').forEach(th=>{
+  th.addEventListener('click',e=>{
+    const r=Number(th.parentElement.dataset.row);
+    if(e.shiftKey&&lastRowClicked!==null){
+      const r0=Math.min(lastRowClicked,r),r1=Math.max(lastRowClicked,r);
+      for(let i=r0;i<=r1;i++)selectedRows.add(i);
+    } else if(e.metaKey||e.ctrlKey){
+      if(selectedRows.has(r))selectedRows.delete(r);else selectedRows.add(r);
+      lastRowClicked=r;
+    } else {
+      selectedRows=new Set([r]);
+      lastRowClicked=r;
+    }
+    paintRowSelection();
+  });
+});
+paintRowSelection();
+copyInsertBtn.addEventListener('click',()=>{
+  if(!selectedRows.size)return;
+  vscode.postMessage({type:'copyInsert',rows:[...selectedRows].sort((a,b)=>a-b)});
+});
+const expandPanel=document.getElementById('expand-panel'),expandBackdrop=document.getElementById('expand-backdrop'),expandTitle=document.getElementById('expand-title'),expandBody=document.getElementById('expand-body');
+function openExpand(title,text){expandTitle.textContent=title;expandBody.textContent=text;expandPanel.hidden=false;expandBackdrop.hidden=false;}
+function closeExpand(){expandPanel.hidden=true;expandBackdrop.hidden=true;}
+document.getElementById('expand-close').addEventListener('click',closeExpand);
+expandBackdrop.addEventListener('click',closeExpand);
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeExpand();});
+document.getElementById('expand-copy').addEventListener('click',()=>copyText(expandBody.textContent));
+document.querySelectorAll('tbody td').forEach(td=>{
+  td.addEventListener('dblclick',e=>{
+    e.preventDefault();
+    const raw=td.textContent;
+    let pretty=raw;
+    try{const parsed=JSON.parse(raw);if(parsed&&typeof parsed==='object'){pretty=JSON.stringify(parsed,null,2);}}catch(err){}
+    const headerCell=document.querySelector('thead th[data-col="'+td.dataset.c+'"]');
+    const colName=headerCell?headerCell.firstChild.textContent:'Value';
+    openExpand(colName+' · row '+(Number(td.dataset.r)+1),pretty);
   });
 });</script></body></html>`;
 }

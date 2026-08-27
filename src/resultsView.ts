@@ -1,8 +1,9 @@
 import * as vscode from 'vscode';
 import { ErrorState, ResultsState, TrinoRequestError } from './types';
 import { emptyResultsHtml, queryErrorHtml, sqlResultsHtml } from './resultsHtml';
-import { exportResult } from './exporter';
+import { exportResult, buildInsertStatement, buildInsertMany, guessTableName } from './exporter';
 import { clampRowLimit } from './util';
+import { createClient, engineOf, speaksSql } from './client';
 
 /**
  * Everything a results grid does — sorting, the row limit, export — independent
@@ -12,6 +13,8 @@ import { clampRowLimit } from './util';
 export abstract class ResultsSurface {
     protected results: ResultsState | undefined;
     protected failure: ErrorState | undefined;
+
+    public constructor(private readonly secrets: vscode.SecretStorage) {}
 
     protected abstract webview(): vscode.Webview | undefined;
     protected abstract reveal(): Promise<void>;
@@ -41,7 +44,7 @@ export abstract class ResultsSurface {
     }
 
     protected async handle(message: unknown): Promise<void> {
-        const request = message as { type?: string; value?: number; format?: string };
+        const request = message as { type?: string; value?: number; format?: string; rows?: number[] };
         if (!this.results || !request?.type) { return; }
         if (request.type === 'limit') {
             await this.applyLimit(Number(request.value));
@@ -49,7 +52,40 @@ export abstract class ResultsSurface {
             this.applySort(Number(request.value));
         } else if (request.type === 'download') {
             await exportResult(this.results, request.format === 'tsv' ? 'tsv' : 'csv');
+        } else if (request.type === 'copyInsert') {
+            await this.copyAsInsert(request.rows ?? []);
         }
+    }
+
+    /**
+     * Builds an INSERT (or, for MongoDB, an insertMany()) from the rows selected
+     * in the grid and puts it on the clipboard. Runs here rather than in the
+     * webview because it needs the rows' real typed values — the grid only has
+     * already-formatted display text — and each engine's own identifier quoting.
+     */
+    private async copyAsInsert(rowIndices: number[]): Promise<void> {
+        const state = this.results;
+        if (!state || !rowIndices.length) { return; }
+        const rows = rowIndices
+            .filter(index => Number.isInteger(index) && index >= 0 && index < state.result.rows.length)
+            .map(index => state.result.rows[index]);
+        if (!rows.length) { return; }
+
+        const engine = engineOf(state.connection);
+        const isSql = speaksSql(engine);
+        const table = guessTableName(state.sql, isSql) ?? (isSql ? 'your_table' : 'your_collection');
+        let text: string;
+        if (isSql) {
+            const client = createClient(this.secrets, state.connection);
+            text = buildInsertStatement(table, state.result.columns, rows, name => client.quoteIdentifier(name));
+        } else {
+            text = buildInsertMany(table, state.result.columns, rows);
+        }
+
+        await vscode.env.clipboard.writeText(text);
+        vscode.window.showInformationMessage(
+            `Copied ${rows.length.toLocaleString()} row(s) as ${isSql ? 'an INSERT statement' : 'a MongoDB insertMany() call'}.`
+        );
     }
 
     /** Cycles a column through ascending, descending, then unsorted. */
@@ -155,16 +191,18 @@ export class ResultsTabs implements vscode.Disposable {
     private shared: ResultsTabPanel | undefined;
     private readonly extras: ResultsTabPanel[] = [];
 
+    public constructor(private readonly secrets: vscode.SecretStorage) {}
+
     /** The reusable tab, recreated if the user closed it. */
     public primary(title: string): ResultsTabPanel {
-        if (!this.shared) { this.shared = new ResultsTabPanel(); }
+        if (!this.shared) { this.shared = new ResultsTabPanel(this.secrets); }
         this.shared.retitle(title);
         this.shared.preferColumn(this.resultsColumn());
         return this.shared;
     }
 
     public additional(title: string): ResultsTabPanel {
-        const panel = new ResultsTabPanel();
+        const panel = new ResultsTabPanel(this.secrets);
         panel.retitle(title);
         // Open beside the results already on screen, not in a fresh split.
         panel.preferColumn(this.resultsColumn());

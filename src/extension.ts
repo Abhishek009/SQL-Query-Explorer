@@ -20,7 +20,7 @@ export function activate(context: vscode.ExtensionContext): void {
     const provider = new TrinoExplorerProvider(store, context.secrets, context.extensionUri);
     const scope = new QueryScope(store);
     const status = new QueryStatusProvider(context, scope);
-    const tabs = new ResultsTabs();
+    const tabs = new ResultsTabs(context.secrets);
     const completions = new SqlCompletionProvider(store, context.secrets, scope);
     const running = new RunningQueryRegistry();
     void store.migrateLegacyConnection();
