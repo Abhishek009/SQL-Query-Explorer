@@ -2,7 +2,7 @@
 
 A VS Code extension for browsing database schemas and running SQL without leaving the editor.
 
-Supports **[Trino](https://trino.io)**, **[PostgreSQL](https://www.postgresql.org)**, **[Supabase](https://supabase.com)**, **[SQLite](https://www.sqlite.org)**, **[DuckDB](https://duckdb.org)**, **[MySQL](https://www.mysql.com)**, **[MariaDB](https://mariadb.org)**, and **[MongoDB](https://www.mongodb.com)**. The explorer, results grid, and editor features are shared by all of them, so further engines slot in behind the same interface.
+Supports **[Trino](https://trino.io)**, **[PostgreSQL](https://www.postgresql.org)**, **[Supabase](https://supabase.com)**, **[SQLite](https://www.sqlite.org)**, **[DuckDB](https://duckdb.org)**, **[MySQL](https://www.mysql.com)**, **[MariaDB](https://mariadb.org)**, **[MongoDB](https://www.mongodb.com)**, and **[Snowflake](https://www.snowflake.com)**. The explorer, results grid, and editor features are shared by all of them, so further engines slot in behind the same interface.
 
 ### Database support
 
@@ -16,12 +16,12 @@ Supports **[Trino](https://trino.io)**, **[PostgreSQL](https://www.postgresql.or
 | [MySQL](https://www.mysql.com) | Supported |
 | [MariaDB](https://mariadb.org) | Supported |
 | [MongoDB](https://www.mongodb.com) | Supported |
-| [Snowflake](https://www.snowflake.com) | Not yet supported |
+| [Snowflake](https://www.snowflake.com) | Supported |
 
 ## Features
 
 ### Connections
-- **Pick the engine when adding a connection** — Trino, PostgreSQL, Supabase, SQLite, DuckDB, MySQL, MariaDB, or MongoDB — and the form shows only the fields that engine needs.
+- **Pick the engine when adding a connection** — Trino, PostgreSQL, Supabase, SQLite, DuckDB, MySQL, MariaDB, MongoDB, or Snowflake — and the form shows only the fields that engine needs.
 - **Test Connection** runs a real query against the details you typed, before saving anything.
 - **Manage several servers at once** — dev, staging, and production sit side by side in the **Connections** view. Add one with the **+** button, then edit, remove, or refresh each from its context menu.
 - One connection is **active** for queries at a time; right-click → **Use Connection for Queries** to switch.
@@ -33,9 +33,10 @@ Supports **[Trino](https://trino.io)**, **[PostgreSQL](https://www.postgresql.or
 - **MySQL** gets its own tab too — host/port/user/password/database/SSL, the same shape as PostgreSQL's. See [MySQL connections](#mysql-connections).
 - **MariaDB** gets its own tab as well, identical in shape to MySQL's and backed by the same client — it's the same wire protocol underneath. See [MariaDB connections](#mariadb-connections).
 - **MongoDB** gets its own tab too, and is the one engine here that doesn't speak SQL — the editor takes Mongo shell syntax instead (`db.collection.find({...})`). See [MongoDB connections](#mongodb-connections).
+- **Snowflake** gets its own tab, addressed by account identifier rather than host/port, with a choice of username/password or browser-based SSO — see [Snowflake connections](#snowflake-connections).
 - Passwords are stored in **VS Code Secret Storage**, never in `settings.json`.
-- Trino traffic goes through the `/v1/statement` REST endpoint; PostgreSQL, Supabase, MySQL, MariaDB, and MongoDB use their native wire protocols; SQLite and DuckDB open their file directly on disk.
-- For PostgreSQL, Supabase, MySQL, MariaDB, and MongoDB the tree's top level lists **databases** on the server, so siblings of the one you opened are browsable too. For SQLite and DuckDB the file itself is the only database, so the tree goes straight to its tables and views.
+- Trino traffic goes through the `/v1/statement` REST endpoint; PostgreSQL, Supabase, MySQL, MariaDB, MongoDB, and Snowflake use their native wire protocols; SQLite and DuckDB open their file directly on disk.
+- For PostgreSQL, Supabase, MySQL, MariaDB, MongoDB, and Snowflake the tree's top level lists **databases** on the server, so siblings of the one you opened are browsable too. For SQLite and DuckDB the file itself is the only database, so the tree goes straight to its tables and views.
 
 #### Connection URL formats
 
@@ -78,7 +79,7 @@ Details:
 
 SQLite has no server to point at — the file on disk *is* the database — so the **SQLite** tab is just a **Database file** field, **Browse…**/**New Database…** buttons backed by VS Code's native file pickers, and an install banner. There's no host, port, user, password, or SSL to configure.
 
-Neither SQLite's nor DuckDB's engine is bundled with the extension — both are native modules, downloaded on demand the first time you open their tab, rather than shipped in every install whether or not anyone uses them:
+Neither SQLite's nor DuckDB's engine is bundled with the extension — both are native modules, downloaded on demand the first time you open their tab, rather than shipped in every install whether or not anyone uses them (Snowflake's driver works the same way, for a different reason — see [Snowflake connections](#snowflake-connections)):
 1. If the engine isn't downloaded yet, the tab shows a banner — click **Install**. This runs `npm install` in the background, into the extension's own storage (not your project), not the extension's `.vsix`. For SQLite that's a one-time **~2MB** download.
 2. Once installed, it stays installed for every connection of that engine afterward.
 3. **Test Connection** and **Save & Connect** work as soon as the banner reports **SQLite is installed and ready.**
@@ -144,6 +145,23 @@ Details:
 - Collections have no fixed schema, so the tree's "columns" and **Show Table DDL** output are both inferred by sampling up to 20 documents — DDL shows the inferred field shape plus one example document rather than a `CREATE TABLE`.
 - A mutation reports an affected-count summary (`updateOne — matched 1, modified 1`) rather than an empty grid, the same as every other engine here.
 - Runs through the official [`mongodb`](https://www.npmjs.com/package/mongodb) driver, a pure-JS package with no native binary — bundled normally, no install-on-demand step like SQLite/DuckDB need.
+
+#### Snowflake connections
+
+Snowflake has no host/port — it's addressed by **account identifier** instead (e.g. `xy12345.us-east-1`, or the newer `orgname-accountname` form) — and always connects over TLS, so there's no SSL toggle either. Two more fields are Snowflake-only:
+
+- **Warehouse** is required — unlike every other field here, Snowflake has no default to fall back to, and queries fail outright without one.
+- **Authentication** is a choice of **Username & Password** or **External Browser (SSO)**. The latter opens your system browser to sign in through your identity provider (Okta, Azure AD, …) and stores no password at all — the Snowflake driver handles the whole redirect/callback flow itself, the extension just waits for it to finish.
+
+**Default database**/**Default schema** and **Role** work like Postgres/MySQL's optional defaults — leave the database blank to browse every one the role can see.
+
+Like SQLite and DuckDB, **Snowflake's driver is downloaded on demand** rather than bundled, for a different reason than either: the official `snowflake-sdk` pulls in AWS/Azure/GCS SDKs for bulk-load (`PUT`/`GET`) features this extension never uses, which would triple the extension's package size for every install if bundled. The Snowflake tab shows the same install banner SQLite/DuckDB do — see [SQLite connections](#sqlite-connections) for the shared flow — just a smaller, one-time **~8MB** download.
+
+Details:
+- Snowflake has a real schema level between database and table, unlike MySQL/MongoDB, so the tree reads `database → schema → Tables/Views` without the repeated-name workaround those need.
+- Table DDL comes from Snowflake's own `GET_DDL()` function — the literal `CREATE` statement, like MySQL/SQLite/DuckDB, not reassembled from catalog metadata.
+- A database/schema/table reference can be written directly in SQL without a separate connection per database, like Trino — `SELECT * FROM otherdb.schema.table` works from any session the role can reach it from.
+- Runs through the official [`snowflake-sdk`](https://www.npmjs.com/package/snowflake-sdk) driver.
 
 #### Importing CSV data
 

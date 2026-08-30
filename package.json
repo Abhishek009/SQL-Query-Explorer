@@ -2,8 +2,8 @@
   "name": "trino-explorer",
   "displayName": "SQL Query Explorer",
   "publisher": "big-tech-talk",
-  "description": "Browse schemas and run queries from VS Code. Supports Trino, PostgreSQL, Supabase, SQLite, DuckDB, MySQL, MariaDB, and MongoDB.",
-  "version": "2.6.0",
+  "description": "Browse schemas and run queries from VS Code. Supports Trino, PostgreSQL, Supabase, SQLite, DuckDB, MySQL, MariaDB, MongoDB, and Snowflake.",
+  "version": "2.6.1",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -36,7 +36,8 @@
     "mysql",
     "mariadb",
     "mongodb",
-    "nosql"
+    "nosql",
+    "snowflake"
   ],
   "activationEvents": [
     "onLanguage:sql"
@@ -201,9 +202,26 @@
                   "duckdb",
                   "mysql",
                   "mongodb",
-                  "mariadb"
+                  "mariadb",
+                  "snowflake"
                 ],
                 "description": "Engine this connection speaks. Absent means Trino."
+              },
+              "warehouse": {
+                "type": "string",
+                "description": "Snowflake only: the default virtual warehouse for the session."
+              },
+              "role": {
+                "type": "string",
+                "description": "Snowflake only: the default security role for the session."
+              },
+              "authenticator": {
+                "type": "string",
+                "enum": [
+                  "password",
+                  "externalbrowser"
+                ],
+                "description": "Snowflake only: how to authenticate. Absent/'password' means username+password; 'externalbrowser' opens the system browser for SSO and stores no password."
               },
               "ssl": {
                 "type": "boolean",

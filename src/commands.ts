@@ -9,11 +9,12 @@ import { ResultsSurface, ResultsTabs } from './resultsView';
 import { QueryStatusProvider } from './queryStatus';
 import { QueryScope } from './queryScope';
 import { RunningQueryRegistry } from './runningQueries';
-import { ConnectionMessage, connectionFormHtml, isBrowseFileMessage, isCheckRuntimeMessage, isConnectionMessage, isCreateFileMessage, isExpandHostMessage, isInstallRuntimeMessage, parseMaxRows, validateConnection } from './connectionForm';
+import { ConnectionMessage, RuntimeEngine, connectionFormHtml, isBrowseFileMessage, isCheckRuntimeMessage, isConnectionMessage, isCreateFileMessage, isExpandHostMessage, isInstallRuntimeMessage, parseMaxRows, validateConnection } from './connectionForm';
 import { createEmptyDatabase } from './engines/sqlite/sqliteClient';
 import { isSqliteInstalled, installSqlite } from './engines/sqlite/sqliteRuntime';
 import { createEmptyDuckdb } from './engines/duckdb/duckdbClient';
 import { installDuckdb, isDuckdbInstalled } from './engines/duckdb/duckdbRuntime';
+import { installSnowflake, isSnowflakeInstalled } from './engines/snowflake/snowflakeRuntime';
 import { addressesByDatabase, closeAllClients, engineOf, ENGINE_LABELS, speaksSql } from './client';
 import { expandPastedUrl, parseConnectionUrl } from './engines/trino/trinoUrls';
 import { hostAndPort } from './engines/postgres/postgresClient';
@@ -396,7 +397,7 @@ export function connectionFromForm(request: ConnectionMessage, id: string): Stor
     const defaultName = {
         trino: 'Trino Connection', postgres: 'PostgreSQL Connection', supabase: 'Supabase Connection',
         sqlite: 'SQLite Database', duckdb: 'DuckDB Database', mysql: 'MySQL Connection', mongodb: 'MongoDB Connection',
-        mariadb: 'MariaDB Connection'
+        mariadb: 'MariaDB Connection', snowflake: 'Snowflake Connection'
     }[request.engine];
     if (request.engine === 'sqlite' || request.engine === 'duckdb') {
         const file = request.file.trim();
@@ -431,6 +432,24 @@ export function connectionFromForm(request: ConnectionMessage, id: string): Stor
             // for, so an empty field means "all of them" rather than a default.
             catalog: request.database.trim() || undefined,
             ssl: request.sslEnabled,
+            maxRows: parseMaxRows(request.maxRows)
+        };
+    }
+    if (request.engine === 'snowflake') {
+        return {
+            id,
+            name: request.name.trim() || defaultName,
+            type: 'snowflake',
+            // No host/port — Snowflake is addressed by account identifier alone.
+            url: request.host.trim(),
+            user: request.user.trim(),
+            // A Snowflake connection can reference any database the role can see
+            // directly from SQL, so an empty field means "all of them", like MySQL.
+            catalog: request.catalog.trim() || undefined,
+            schema: request.schema.trim() || undefined,
+            warehouse: request.warehouse.trim() || undefined,
+            role: request.role.trim() || undefined,
+            authenticator: request.authMethod === 'externalbrowser' ? 'externalbrowser' : undefined,
             maxRows: parseMaxRows(request.maxRows)
         };
     }
@@ -491,6 +510,13 @@ async function reportConnectionTest(
     }
 }
 
+/** Engines whose driver downloads on demand rather than being bundled — see each one's own runtime module for why. */
+const RUNTIME_ENGINES: Record<RuntimeEngine, { label: string; isInstalled: () => boolean; install: (onOutput: (line: string) => void) => Promise<void> }> = {
+    sqlite: { label: 'SQLite', isInstalled: isSqliteInstalled, install: installSqlite },
+    duckdb: { label: 'DuckDB', isInstalled: isDuckdbInstalled, install: installDuckdb },
+    snowflake: { label: 'Snowflake', isInstalled: isSnowflakeInstalled, install: installSnowflake }
+};
+
 export async function showConnectionWindow(
     context: vscode.ExtensionContext,
     store: ConnectionStore,
@@ -499,15 +525,19 @@ export async function showConnectionWindow(
 ): Promise<void> {
     const engine = engineOf(existing ?? { type: 'trino' } as StoredConnection);
     const isLocalFile = engine === 'sqlite' || engine === 'duckdb';
+    const isSnowflake = engine === 'snowflake';
     const wireProtocol = !isLocalFile && addressesByDatabase(engine);
     // A new connection starts blank so the placeholder hints show and clear on
     // focus, rather than pre-filling fields the user would have to type over.
     const current = existing && !isLocalFile
-        ? wireProtocol
-            ? engine === 'mongodb'
-                ? { ...mongoHostAndPort(existing.url), sslEnabled: Boolean(existing.ssl) }
-                : { ...hostAndPort(existing.url), sslEnabled: Boolean(existing.ssl) }
-            : parseConnectionUrl(existing.url)
+        ? isSnowflake
+            // No host/port to parse back out — the account identifier is the whole thing.
+            ? { host: existing.url, port: '', sslEnabled: true }
+            : wireProtocol
+                ? engine === 'mongodb'
+                    ? { ...mongoHostAndPort(existing.url), sslEnabled: Boolean(existing.ssl) }
+                    : { ...hostAndPort(existing.url), sslEnabled: Boolean(existing.ssl) }
+                : parseConnectionUrl(existing.url)
         : { host: '', port: '', sslEnabled: false };
     const panel = vscode.window.createWebviewPanel(
         'trinoConnection',
@@ -525,11 +555,16 @@ export async function showConnectionWindow(
         sslEnabled: current.sslEnabled,
         sslVerify: existing?.sslVerify ?? true,
         user: existing?.user ?? '',
-        catalog: wireProtocol ? '' : (existing?.catalog ?? ''),
+        // Snowflake uses catalog/schema directly, like Trino, rather than folding
+        // the database into the generic `database` field every other server does.
+        catalog: (wireProtocol && !isSnowflake) ? '' : (existing?.catalog ?? ''),
         schema: existing?.schema ?? '',
-        database: wireProtocol ? (existing?.catalog ?? '') : '',
+        database: (wireProtocol && !isSnowflake) ? (existing?.catalog ?? '') : '',
         file: isLocalFile ? (existing?.url ?? '') : '',
-        maxRows: existing?.maxRows ? String(existing.maxRows) : ''
+        maxRows: existing?.maxRows ? String(existing.maxRows) : '',
+        warehouse: existing?.warehouse ?? '',
+        role: existing?.role ?? '',
+        authMethod: existing?.authenticator ?? 'password'
     }, Boolean(existing), hasPassword);
 
     panel.webview.onDidReceiveMessage(async (message: unknown) => {
@@ -538,7 +573,8 @@ export async function showConnectionWindow(
                 type: 'test', engine: message.engine, name: '', host: message.host, port: message.port,
                 sslEnabled: message.sslEnabled, sslVerify: true, user: message.user,
                 catalog: message.catalog, schema: message.schema, database: message.database,
-                file: '', maxRows: '', password: message.password, clearPassword: false, connect: false
+                file: '', maxRows: '', password: message.password, clearPassword: false, connect: false,
+                warehouse: '', role: '', authMethod: 'password'
             };
             const expanded = message.engine === 'supabase' ? expandPastedSupabaseUrl(asConnectionMessage)
                 : message.engine === 'mongodb' ? expandPastedMongoUrl(asConnectionMessage)
@@ -583,13 +619,12 @@ export async function showConnectionWindow(
             return;
         }
         if (isCheckRuntimeMessage(message)) {
-            const installed = message.engine === 'sqlite' ? isSqliteInstalled() : isDuckdbInstalled();
+            const installed = RUNTIME_ENGINES[message.engine].isInstalled();
             void panel.webview.postMessage({ type: 'runtimeStatus', engine: message.engine, installed });
             return;
         }
         if (isInstallRuntimeMessage(message)) {
-            const label = message.engine === 'sqlite' ? 'SQLite' : 'DuckDB';
-            const install = message.engine === 'sqlite' ? installSqlite : installDuckdb;
+            const { label, install } = RUNTIME_ENGINES[message.engine];
             try {
                 await install(line => {
                     void panel.webview.postMessage({ type: 'runtimeInstallProgress', engine: message.engine, message: line.trim().split('\n').pop() || 'Installing…' });

@@ -12,10 +12,12 @@ import { closeAllClients } from './client';
 import { importDataFromFile } from './importData';
 import { initDuckdbRuntime } from './engines/duckdb/duckdbRuntime';
 import { initSqliteRuntime } from './engines/sqlite/sqliteRuntime';
+import { initSnowflakeRuntime } from './engines/snowflake/snowflakeRuntime';
 
 export function activate(context: vscode.ExtensionContext): void {
     initDuckdbRuntime(context);
     initSqliteRuntime(context);
+    initSnowflakeRuntime(context);
     const store = new ConnectionStore(context);
     const provider = new TrinoExplorerProvider(store, context.secrets, context.extensionUri);
     const scope = new QueryScope(store);

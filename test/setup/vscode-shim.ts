@@ -26,3 +26,49 @@ export class CancellationTokenSource {
     }
     public dispose(): void { /* no-op */ }
 }
+
+/**
+ * Just enough of the tree-view API for explorer.ts to load — commands.ts
+ * imports it, and pulling in commands.ts is the only way to unit-test its own
+ * pure functions (connectionFromForm, validateConnection) outside the
+ * extension host. Never asked to actually render or manage a tree, so nothing
+ * here needs to behave like a real TreeItem beyond holding the properties
+ * ExplorerItem sets on it.
+ */
+export enum TreeItemCollapsibleState { None = 0, Collapsed = 1, Expanded = 2 }
+
+export class TreeItem {
+    public collapsibleState?: TreeItemCollapsibleState;
+    public contextValue?: string;
+    public tooltip?: unknown;
+    public description?: string;
+    public iconPath?: unknown;
+    public command?: unknown;
+    public constructor(public label?: string, collapsibleState?: TreeItemCollapsibleState) {
+        this.collapsibleState = collapsibleState;
+    }
+}
+
+export class ThemeIcon {
+    public constructor(public readonly id: string) {}
+}
+
+export class MarkdownString {
+    public constructor(public value = '') {}
+}
+
+export class EventEmitter<T> {
+    private readonly listeners: Array<(value: T) => void> = [];
+    public event = (listener: (value: T) => void): { dispose: () => void } => {
+        this.listeners.push(listener);
+        return { dispose: () => undefined };
+    };
+    public fire(value: T): void { this.listeners.forEach(listener => listener(value)); }
+    public dispose(): void { /* no-op */ }
+}
+
+export class Uri {
+    private constructor(public readonly fsPath: string) {}
+    public static file(fsPath: string): Uri { return new Uri(fsPath); }
+    public static joinPath(base: Uri, ...segments: string[]): Uri { return new Uri([base.fsPath, ...segments].join('/')); }
+}

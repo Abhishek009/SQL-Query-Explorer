@@ -49,9 +49,11 @@ temp/
 *.tmp
 *.bak
 
-# Optional local caches for the SQLite/DuckDB integration tests — not
-# required to run the suite (those tests skip themselves without them);
+# Optional local caches for the SQLite/DuckDB/Snowflake integration tests —
+# not required to run the suite (those tests skip themselves without them);
 # populate with `npm install better-sqlite3 --prefix .sqlite-test-cache` /
-# `npm install @duckdb/node-api --prefix .duckdb-test-cache` to enable them.
+# `npm install @duckdb/node-api --prefix .duckdb-test-cache` /
+# `npm install snowflake-sdk --prefix .snowflake-test-cache` to enable them.
 .sqlite-test-cache/
 .duckdb-test-cache/
+.snowflake-test-cache/

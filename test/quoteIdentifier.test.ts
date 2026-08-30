@@ -6,6 +6,7 @@ import { SqliteClient } from '../src/engines/sqlite/sqliteClient';
 import { DuckdbClient } from '../src/engines/duckdb/duckdbClient';
 import { MySqlClient } from '../src/engines/mysql/mysqlClient';
 import { MongodbClient } from '../src/engines/mongodb/mongodbClient';
+import { SnowflakeClient } from '../src/engines/snowflake/snowflakeClient';
 import { fakeSecrets } from './setup/support';
 import type { StoredConnection } from '../src/types';
 import type { SqlClient } from '../src/client';
@@ -31,7 +32,8 @@ describe('quoteIdentifier', () => {
             new TrinoClient(fakeSecrets() as never, connection('trino')),
             new PostgresClient(fakeSecrets() as never, connection('postgres')),
             new SqliteClient(fakeSecrets() as never, connection('sqlite')),
-            new DuckdbClient(fakeSecrets() as never, connection('duckdb'))
+            new DuckdbClient(fakeSecrets() as never, connection('duckdb')),
+            new SnowflakeClient(fakeSecrets() as never, connection('snowflake'))
         ];
         for (const client of clients) {
             expect(client.quoteIdentifier('col name')).toBe('"col name"');

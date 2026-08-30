@@ -17,16 +17,19 @@ esbuild.mjs
 test/**
 .env
 .env.*
-# Opt-in local caches for the SQLite/DuckDB integration tests — never
+# Opt-in local caches for the SQLite/DuckDB/Snowflake integration tests — never
 # installed for a real user, only present if a contributor deliberately
 # fetched one to test against a real engine (see test/engines/*.test.ts).
 .sqlite-test-cache/**
 .duckdb-test-cache/**
+.snowflake-test-cache/**
 
-# pg is bundled into dist/extension.js by esbuild, so it needs nothing here.
-# SQLite and DuckDB are native modules downloaded on demand at runtime
-# instead — see sqliteRuntime.ts/duckdbRuntime.ts — so nothing about them
-# ships in the package at all.
+# pg/mysql2/mongodb are bundled into dist/extension.js by esbuild, so they
+# need nothing here. SQLite, DuckDB, and Snowflake are downloaded on demand at
+# runtime instead — see sqliteRuntime.ts/duckdbRuntime.ts/snowflakeRuntime.ts
+# — so nothing about them ships in the package at all. Snowflake specifically
+# because its official driver pulls in AWS/Azure/GCS SDKs for bulk-load
+# features this extension never uses, which would triple the package size.
 node_modules/**
 
 # Build and repo config

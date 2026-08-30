@@ -6,7 +6,7 @@ export interface StoredConnection {
     url: string;
     user: string;
     /** Engine this connection speaks; absent means Trino, from before Postgres. */
-    type?: 'trino' | 'postgres' | 'supabase' | 'sqlite' | 'duckdb' | 'mysql' | 'mongodb' | 'mariadb';
+    type?: 'trino' | 'postgres' | 'supabase' | 'sqlite' | 'duckdb' | 'mysql' | 'mongodb' | 'mariadb' | 'snowflake';
     catalog?: string;
     schema?: string;
     /** Postgres/Supabase/MySQL/MongoDB/MariaDB only: TLS to the server. Trino carries this in its URL scheme. */
@@ -16,6 +16,12 @@ export interface StoredConnection {
     sslVerify?: boolean;
     /** Optional per-connection override of `trino.query.maxRows`. */
     maxRows?: number;
+    /** Snowflake only: the default virtual warehouse for the session. */
+    warehouse?: string;
+    /** Snowflake only: the default security role for the session. */
+    role?: string;
+    /** Snowflake only: how to authenticate. Absent/'password' means username+password; 'externalbrowser' opens the system browser for SSO and stores no password. */
+    authenticator?: 'password' | 'externalbrowser';
 }
 
 export interface TrinoQueryResult {

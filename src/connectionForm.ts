@@ -7,10 +7,11 @@ import { duckdbFieldsHtml } from './engines/duckdb/duckdbConnectionFields';
 import { mysqlFieldsHtml } from './engines/mysql/mysqlConnectionFields';
 import { mongodbFieldsHtml } from './engines/mongodb/mongodbConnectionFields';
 import { mariadbFieldsHtml } from './engines/mariadb/mariadbConnectionFields';
+import { snowflakeFieldsHtml } from './engines/snowflake/snowflakeConnectionFields';
 
 export interface ConnectionFormData {
     name: string;
-    engine: 'trino' | 'postgres' | 'supabase' | 'sqlite' | 'duckdb' | 'mysql' | 'mongodb' | 'mariadb';
+    engine: 'trino' | 'postgres' | 'supabase' | 'sqlite' | 'duckdb' | 'mysql' | 'mongodb' | 'mariadb' | 'snowflake';
     host: string;
     port: string;
     sslEnabled: boolean;
@@ -23,6 +24,12 @@ export interface ConnectionFormData {
     /** SQLite/DuckDB only: the local file path, which doubles as the connection's URL. */
     file: string;
     maxRows: string;
+    /** Snowflake only: the default virtual warehouse. */
+    warehouse: string;
+    /** Snowflake only: the default security role. */
+    role: string;
+    /** Snowflake only: 'password' (default) or 'externalbrowser' for browser-based SSO. */
+    authMethod: string;
 }
 
 export interface ConnectionMessage extends ConnectionFormData {
@@ -63,6 +70,9 @@ export function isExpandHostMessage(value: unknown): value is ExpandHostMessage 
 /** The SQLite/DuckDB tabs share a "local file" shape, tagged by which engine asked. */
 export type FileEngine = 'sqlite' | 'duckdb';
 
+/** Engines whose driver is downloaded on demand rather than bundled — a heavier install banner, not necessarily a local file (Snowflake has neither). */
+export type RuntimeEngine = 'sqlite' | 'duckdb' | 'snowflake';
+
 /** The Browse button, asking the extension host for a native file picker. */
 export function isBrowseFileMessage(value: unknown): value is { type: 'browseFile'; engine: FileEngine } {
     return typeof value === 'object' && value !== null && (value as { type?: unknown }).type === 'browseFile';
@@ -73,13 +83,13 @@ export function isCreateFileMessage(value: unknown): value is { type: 'createFil
     return typeof value === 'object' && value !== null && (value as { type?: unknown }).type === 'createFile';
 }
 
-/** The SQLite/DuckDB tab asking whether its native module is already downloaded. */
-export function isCheckRuntimeMessage(value: unknown): value is { type: 'checkRuntime'; engine: FileEngine } {
+/** A tab whose driver downloads on demand asking whether it's already installed. */
+export function isCheckRuntimeMessage(value: unknown): value is { type: 'checkRuntime'; engine: RuntimeEngine } {
     return typeof value === 'object' && value !== null && (value as { type?: unknown }).type === 'checkRuntime';
 }
 
-/** The SQLite/DuckDB tab's Install button. */
-export function isInstallRuntimeMessage(value: unknown): value is { type: 'installRuntime'; engine: FileEngine } {
+/** That tab's Install button. */
+export function isInstallRuntimeMessage(value: unknown): value is { type: 'installRuntime'; engine: RuntimeEngine } {
     return typeof value === 'object' && value !== null && (value as { type?: unknown }).type === 'installRuntime';
 }
 
@@ -92,6 +102,13 @@ export function parseMaxRows(value: string): number | undefined {
 export function validateConnection(value: ConnectionMessage): string | undefined {
     if (value.engine === 'sqlite' || value.engine === 'duckdb') {
         return value.file.trim() ? undefined : `Choose a ${value.engine === 'sqlite' ? 'SQLite' : 'DuckDB'} database file.`;
+    }
+    if (value.engine === 'snowflake') {
+        // No host/port to validate — Snowflake is addressed by account identifier alone.
+        if (!value.host.trim()) { return 'Enter your Snowflake account identifier.'; }
+        if (!value.warehouse.trim()) { return 'Enter a warehouse — Snowflake has no default to fall back to.'; }
+        if (value.authMethod !== 'externalbrowser' && !value.user.trim()) { return 'A user name is required for username & password authentication.'; }
+        return undefined;
     }
     const isMongo = value.engine === 'mongodb';
     // A pasted mongodb:// / mongodb+srv:// string carries everything itself —
@@ -111,7 +128,8 @@ export function validateConnection(value: ConnectionMessage): string | undefined
 
 const BLANK: ConnectionFormData = {
     name: '', engine: 'trino', host: '', port: '', sslEnabled: false, sslVerify: true,
-    user: '', catalog: '', schema: '', database: '', file: '', maxRows: ''
+    user: '', catalog: '', schema: '', database: '', file: '', maxRows: '',
+    warehouse: '', role: '', authMethod: 'password'
 };
 
 export function connectionFormHtml(webview: vscode.Webview, values: ConnectionFormData, isEdit: boolean, hasPassword: boolean): string {
@@ -127,6 +145,7 @@ export function connectionFormHtml(webview: vscode.Webview, values: ConnectionFo
     const mysqlValues = values.engine === 'mysql' ? values : { ...BLANK, engine: 'mysql' as const };
     const mongodbValues = values.engine === 'mongodb' ? values : { ...BLANK, engine: 'mongodb' as const };
     const mariadbValues = values.engine === 'mariadb' ? values : { ...BLANK, engine: 'mariadb' as const };
+    const snowflakeValues = values.engine === 'snowflake' ? values : { ...BLANK, engine: 'snowflake' as const };
 
     const styles = `
 :root{--gap:12px;--radius:6px}
@@ -148,6 +167,8 @@ input::placeholder{color:var(--vscode-input-placeholderForeground,rgba(128,128,1
 input:hover{border-color:var(--vscode-inputOption-hoverBackground,rgba(128,128,128,.7))}
 input:focus{outline:none;border-color:var(--vscode-focusBorder,#2f7ce0);box-shadow:0 0 0 2px color-mix(in srgb,var(--vscode-focusBorder,#2f7ce0) 30%,transparent)}
 .hint{margin:5px 0 0;font-size:.87em;color:var(--vscode-descriptionForeground);line-height:1.4}
+.radio-row{display:flex;gap:16px;margin-top:4px;flex-wrap:wrap}
+.radio-row label{display:flex;align-items:center;gap:6px;font-weight:400;cursor:pointer}
 .row{display:grid;grid-template-columns:minmax(0,1fr) 110px;gap:10px}
 .row-eq{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .switch{display:flex;align-items:center;gap:10px;cursor:pointer;user-select:none;margin:var(--gap) 0 0}
@@ -205,7 +226,8 @@ button:focus-visible{outline:2px solid var(--vscode-focusBorder,#2f7ce0);outline
     const isMysql = values.engine === 'mysql';
     const isMongodb = values.engine === 'mongodb';
     const isMariadb = values.engine === 'mariadb';
-    const isTrino = !isPostgres && !isSupabase && !isSqlite && !isDuckdb && !isMysql && !isMongodb && !isMariadb;
+    const isSnowflake = values.engine === 'snowflake';
+    const isTrino = !isPostgres && !isSupabase && !isSqlite && !isDuckdb && !isMysql && !isMongodb && !isMariadb && !isSnowflake;
     const tab = (active: boolean) => active ? ' active' : '';
     const selected = (active: boolean) => active ? 'true' : 'false';
 
@@ -228,6 +250,7 @@ button:focus-visible{outline:2px solid var(--vscode-focusBorder,#2f7ce0);outline
     <button type="button" class="tab${tab(isMysql)}" data-pane="mysql" data-engine="mysql" role="tab" aria-selected="${selected(isMysql)}"><span class="tab-icon" style="background:#00758f">M</span>MySQL</button>
     <button type="button" class="tab${tab(isMongodb)}" data-pane="mongodb" data-engine="mongodb" role="tab" aria-selected="${selected(isMongodb)}"><span class="tab-icon" style="background:#13aa52">🍃</span>MongoDB</button>
     <button type="button" class="tab${tab(isMariadb)}" data-pane="mariadb" data-engine="mariadb" role="tab" aria-selected="${selected(isMariadb)}"><span class="tab-icon" style="background:#003545">🦭</span>MariaDB</button>
+    <button type="button" class="tab${tab(isSnowflake)}" data-pane="snowflake" data-engine="snowflake" role="tab" aria-selected="${selected(isSnowflake)}"><span class="tab-icon" style="background:#29b5e8">❄</span>Snowflake</button>
   </div>
   <form id="connection">
    <div class="pane${tab(isTrino)}" data-pane="trino">${trinoFieldsHtml(trinoValues, passwordHint, hasPassword)}
@@ -245,6 +268,8 @@ button:focus-visible{outline:2px solid var(--vscode-focusBorder,#2f7ce0);outline
    <div class="pane${tab(isMongodb)}" data-pane="mongodb">${mongodbFieldsHtml(mongodbValues, passwordHint, hasPassword)}
    </div>
    <div class="pane${tab(isMariadb)}" data-pane="mariadb">${mariadbFieldsHtml(mariadbValues, passwordHint, hasPassword)}
+   </div>
+   <div class="pane${tab(isSnowflake)}" data-pane="snowflake">${snowflakeFieldsHtml(snowflakeValues, passwordHint, hasPassword)}
    </div>
    <div id="result" class="result" role="status"></div>
   </form>
@@ -331,7 +356,16 @@ function mariadbPayload(kind){
     catalog:'',schema:'',database:byId('a-database').value,
     maxRows:byId('a-maxRows').value,connect};
 }
-const payloadByEngine={postgres:postgresPayload,supabase:supabasePayload,sqlite:sqlitePayload,duckdb:duckdbPayload,mysql:mysqlPayload,mongodb:mongodbPayload,mariadb:mariadbPayload,trino:trinoPayload};
+function snowflakePayload(kind){
+  const authMethod=document.querySelector('input[name="f-authMethod"]:checked').value;
+  return {type:kind,engine:'snowflake',name:byId('f-name').value,host:byId('f-host').value,
+    port:'',sslEnabled:true,sslVerify:true,user:byId('f-user').value,
+    password:byId('f-password').value,clearPassword:byId('f-clearPassword').checked,
+    catalog:byId('f-catalog').value,schema:byId('f-schema').value,database:'',
+    warehouse:byId('f-warehouse').value,role:byId('f-role').value,authMethod,
+    maxRows:byId('f-maxRows').value,connect};
+}
+const payloadByEngine={postgres:postgresPayload,supabase:supabasePayload,sqlite:sqlitePayload,duckdb:duckdbPayload,mysql:mysqlPayload,mongodb:mongodbPayload,mariadb:mariadbPayload,snowflake:snowflakePayload,trino:trinoPayload};
 function payload(kind){ return payloadByEngine[engine](kind); }
 
 document.querySelectorAll('button[type=submit]').forEach(b=>b.addEventListener('click',()=>{connect=b.dataset.connect==='true';}));
@@ -354,12 +388,13 @@ byId('t-host').addEventListener('blur',()=>{ vscode.postMessage(trinoPayload('ex
 byId('s-host').addEventListener('blur',()=>{ vscode.postMessage(supabasePayload('expandHost')); });
 byId('g-host').addEventListener('blur',()=>{ vscode.postMessage(mongodbPayload('expandHost')); });
 
-// SQLite and DuckDB both download their native module on demand rather than
-// bundling it, so both tabs lead with the same install-banner flow — just
-// different element id prefixes, labels, and download sizes.
+// SQLite, DuckDB, and Snowflake all download their driver on demand rather
+// than bundling it, so each tab leads with the same install-banner flow —
+// just different element id prefixes, labels, and download sizes.
 const RUNTIME_ENGINES={
   sqlite:{label:'SQLite',size:'~2MB'},
-  duckdb:{label:'DuckDB',size:'~100MB'}
+  duckdb:{label:'DuckDB',size:'~100MB'},
+  snowflake:{label:'Snowflake',size:'~8MB'}
 };
 const runtimeChecked={};
 function setupRuntimeBanner(runtimeEngine){
@@ -383,7 +418,7 @@ function setupRuntimeBanner(runtimeEngine){
   if(engine===runtimeEngine){ ensureChecked(); }
   return setBanner;
 }
-const runtimeBanners={sqlite:setupRuntimeBanner('sqlite'),duckdb:setupRuntimeBanner('duckdb')};
+const runtimeBanners={sqlite:setupRuntimeBanner('sqlite'),duckdb:setupRuntimeBanner('duckdb'),snowflake:setupRuntimeBanner('snowflake')};
 
 const hostExpandPrefix={trino:'t',supabase:'s',mongodb:'g'};
 window.addEventListener('message',e=>{
@@ -430,7 +465,13 @@ window.addEventListener('message',e=>{
     byId(e.data.engine==='duckdb'?'d-file':'l-file').value=e.data.path;
   }
 });
-const focusIds={trino:'t-host',postgres:'p-host',supabase:'s-host',sqlite:'l-file',duckdb:'d-file',mysql:'m-host',mongodb:'g-host',mariadb:'a-host'};
+document.querySelectorAll('input[name="f-authMethod"]').forEach(radio=>radio.addEventListener('change',()=>{
+  const isBrowser=document.querySelector('input[name="f-authMethod"]:checked').value==='externalbrowser';
+  byId('f-password-field').hidden=isBrowser;
+  byId('f-forget-row').hidden=isBrowser;
+  byId('f-browser-hint').hidden=!isBrowser;
+}));
+const focusIds={trino:'t-host',postgres:'p-host',supabase:'s-host',sqlite:'l-file',duckdb:'d-file',mysql:'m-host',mongodb:'g-host',mariadb:'a-host',snowflake:'f-host'};
 byId(focusIds[engine]).focus();`;
 
     return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Trino Connection</title><style>${styles}</style></head><body>${body}<script nonce="${nonce}">${script}</script></body></html>`;

@@ -7,6 +7,7 @@ import { SqliteClient } from './engines/sqlite/sqliteClient';
 import { DuckdbClient } from './engines/duckdb/duckdbClient';
 import { MySqlClient } from './engines/mysql/mysqlClient';
 import { MongodbClient } from './engines/mongodb/mongodbClient';
+import { SnowflakeClient } from './engines/snowflake/snowflakeClient';
 
 /**
  * What the explorer, completion, and query commands need from an engine. Every
@@ -53,9 +54,9 @@ export interface SqlClient {
     testConnection(token?: vscode.CancellationToken): Promise<string>;
 }
 
-export type EngineId = 'trino' | 'postgres' | 'supabase' | 'sqlite' | 'duckdb' | 'mysql' | 'mongodb' | 'mariadb';
+export type EngineId = 'trino' | 'postgres' | 'supabase' | 'sqlite' | 'duckdb' | 'mysql' | 'mongodb' | 'mariadb' | 'snowflake';
 
-const NON_TRINO_TYPES = new Set<StoredConnection['type']>(['postgres', 'supabase', 'sqlite', 'duckdb', 'mysql', 'mongodb', 'mariadb']);
+const NON_TRINO_TYPES = new Set<StoredConnection['type']>(['postgres', 'supabase', 'sqlite', 'duckdb', 'mysql', 'mongodb', 'mariadb', 'snowflake']);
 
 /** Connections without a type predate Postgres support, so they are Trino. */
 export function engineOf(connection: StoredConnection): EngineId {
@@ -70,7 +71,8 @@ export const ENGINE_LABELS: Record<EngineId, string> = {
     duckdb: 'DuckDB',
     mysql: 'MySQL',
     mongodb: 'MongoDB',
-    mariadb: 'MariaDB'
+    mariadb: 'MariaDB',
+    snowflake: 'Snowflake'
 };
 
 /** MongoDB speaks shell syntax, not SQL — commands built elsewhere need to know which to generate. */
@@ -97,6 +99,7 @@ export function createClient(
         case 'mysql':
         case 'mariadb': return new MySqlClient(secrets, connection, registry, password);
         case 'mongodb': return new MongodbClient(secrets, connection, registry, password);
+        case 'snowflake': return new SnowflakeClient(secrets, connection, registry, password);
         case 'postgres':
         case 'supabase': return new PostgresClient(secrets, connection, registry, password);
         default: return new TrinoClient(secrets, connection, registry, password);
@@ -114,4 +117,5 @@ export async function closeAllClients(connectionId?: string): Promise<void> {
     DuckdbClient.closeAll(connectionId);
     await MySqlClient.closeAll(connectionId);
     await MongodbClient.closeAll(connectionId);
+    await SnowflakeClient.closeAll(connectionId);
 }

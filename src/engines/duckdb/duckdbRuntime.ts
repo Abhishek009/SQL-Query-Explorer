@@ -40,6 +40,12 @@ export function isDuckdbInstalled(): boolean {
 export async function installDuckdb(onOutput: (line: string) => void, token?: vscode.CancellationToken): Promise<void> {
     const dir = requireRuntimeDir();
     fs.mkdirSync(dir, { recursive: true });
+    // Without a package.json here, npm walks up to the nearest ancestor one to
+    // find its "project root" — harmless for a real install (this lives under
+    // globalStorageUri, never inside a project), but a real risk for anyone
+    // pointing runtimeDir at a path nested under a repo (e.g. in tests).
+    const manifest = path.join(dir, 'package.json');
+    if (!fs.existsSync(manifest)) { fs.writeFileSync(manifest, '{}'); }
     await new Promise<void>((resolve, reject) => {
         const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
         const child = spawn(npm, ['install', '@duckdb/node-api', '--no-save', '--omit=dev', '--no-audit', '--no-fund'], {
