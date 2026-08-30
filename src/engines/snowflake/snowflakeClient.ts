@@ -334,12 +334,30 @@ export function normalizeAccountIdentifier(input: string): string {
         .replace(/\.snowflakecomputing\.com$/i, '');
 }
 
-function asSnowflakeError(error: unknown): Error {
+/**
+ * Snowflake's own text for this ("There was an error related to the SAML
+ * Identity Provider account parameter. Contact Snowflake support.") names no
+ * actual cause. In practice this fires when EXTERNALBROWSER is used against
+ * an account with no SSO/SAML identity-provider integration configured at
+ * all — common on trial/personal accounts — which is an account-level admin
+ * setup, not something a client request can work around.
+ */
+const SAML_NOT_CONFIGURED = /SAML Identity Provider/i;
+
+export function asSnowflakeError(error: unknown): Error {
     const failure = error as { message?: string; code?: string | number; sqlState?: string };
-    const message = failure?.message ?? String(error);
+    const rawMessage = failure?.message ?? String(error);
     const details = [
         failure?.code !== undefined && `code: ${failure.code}`,
         failure?.sqlState && `sqlState: ${failure.sqlState}`
     ].filter(Boolean).join('\n');
-    return new TrinoRequestError(message, details || undefined);
+    if (SAML_NOT_CONFIGURED.test(rawMessage)) {
+        const message = 'This Snowflake account does not appear to have SSO configured — External Browser '
+            + 'authentication needs an administrator to set up a SAML2 identity-provider integration first '
+            + '(Snowsight → Admin → Security, or CREATE SECURITY INTEGRATION ... TYPE = SAML2). Trial and '
+            + 'personal accounts usually don\'t have this set up. Switch this connection to Username & '
+            + 'Password if you don\'t specifically need SSO.';
+        return new TrinoRequestError(message, [rawMessage, details].filter(Boolean).join('\n'));
+    }
+    return new TrinoRequestError(rawMessage, details || undefined);
 }

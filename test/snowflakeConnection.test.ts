@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { validateConnection } from '../src/connectionForm';
 import { connectionFromForm } from '../src/commands';
-import { normalizeAccountIdentifier } from '../src/engines/snowflake/snowflakeClient';
+import { asSnowflakeError, normalizeAccountIdentifier } from '../src/engines/snowflake/snowflakeClient';
 import type { ConnectionMessage } from '../src/connectionForm';
 
 function message(overrides: Partial<ConnectionMessage> = {}): ConnectionMessage {
@@ -117,5 +117,24 @@ describe('connectionFromForm (Snowflake)', () => {
     it('defaults the connection name when none is given', () => {
         const connection = connectionFromForm(message({ host: 'xy12345', warehouse: 'WH', user: 'alice' }), 'id-1');
         expect(connection.name).toBe('Snowflake Connection');
+    });
+});
+
+// Regression coverage for a real bug report: EXTERNALBROWSER failing against
+// an account with no SSO/SAML integration configured (common on trial/personal
+// accounts) surfaces only as Snowflake's generic "Contact Snowflake support"
+// text, which names no actual cause.
+describe('asSnowflakeError', () => {
+    it('translates the SAML-not-configured error into actionable guidance, keeping the raw text as detail', () => {
+        const raw = 'Authentication failed. Error code: 390190, message: There was an error related to the SAML Identity Provider account parameter. Contact Snowflake support.';
+        const error = asSnowflakeError({ message: raw, code: 390190 });
+        expect(error.message).toMatch(/does not appear to have SSO configured/i);
+        expect(error.message).toMatch(/Username & Password/i);
+        expect((error as { details?: string }).details).toContain(raw);
+    });
+
+    it('leaves an unrelated error message untouched', () => {
+        const error = asSnowflakeError({ message: 'Incorrect username or password was specified.', code: 390100 });
+        expect(error.message).toBe('Incorrect username or password was specified.');
     });
 });
