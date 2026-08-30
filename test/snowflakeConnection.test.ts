@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { validateConnection } from '../src/connectionForm';
 import { connectionFromForm } from '../src/commands';
+import { normalizeAccountIdentifier } from '../src/engines/snowflake/snowflakeClient';
 import type { ConnectionMessage } from '../src/connectionForm';
 
 function message(overrides: Partial<ConnectionMessage> = {}): ConnectionMessage {
@@ -41,11 +42,48 @@ describe('validateConnection (Snowflake)', () => {
     });
 });
 
+// Regression coverage for a real bug report: pasting the full Snowsight URL
+// into Account identifier (a very natural thing to do — it's exactly what
+// shows in the browser bar) was passed straight through to the driver's
+// `account` option, which broke SSO outright with Snowflake's generic,
+// unhelpful "error related to the SAML Identity Provider account parameter" —
+// the identity-provider lookup is keyed off that exact string.
+describe('normalizeAccountIdentifier', () => {
+    it('leaves a bare account identifier untouched', () => {
+        expect(normalizeAccountIdentifier('xy12345.us-east-1')).toBe('xy12345.us-east-1');
+        expect(normalizeAccountIdentifier('myorg-myaccount')).toBe('myorg-myaccount');
+    });
+
+    it('strips a pasted https:// Snowsight URL down to the bare identifier', () => {
+        expect(normalizeAccountIdentifier('https://xy12345.us-east-1.snowflakecomputing.com')).toBe('xy12345.us-east-1');
+    });
+
+    it('strips a trailing slash or path along with the scheme', () => {
+        expect(normalizeAccountIdentifier('https://xy12345.us-east-1.snowflakecomputing.com/console')).toBe('xy12345.us-east-1');
+        expect(normalizeAccountIdentifier('https://xy12345.us-east-1.snowflakecomputing.com/')).toBe('xy12345.us-east-1');
+    });
+
+    it('strips the .snowflakecomputing.com suffix even without a scheme', () => {
+        expect(normalizeAccountIdentifier('xy12345.us-east-1.snowflakecomputing.com')).toBe('xy12345.us-east-1');
+    });
+
+    it('trims surrounding whitespace', () => {
+        expect(normalizeAccountIdentifier('  xy12345.us-east-1  ')).toBe('xy12345.us-east-1');
+    });
+});
+
 describe('connectionFromForm (Snowflake)', () => {
     it('stores the account identifier as the url, with no host/port assembly', () => {
         const connection = connectionFromForm(message({ host: 'xy12345.us-east-1', warehouse: 'WH', user: 'alice' }), 'id-1');
         expect(connection.url).toBe('xy12345.us-east-1');
         expect(connection.type).toBe('snowflake');
+    });
+
+    it('normalizes a pasted full Snowsight URL down to the bare account identifier', () => {
+        const connection = connectionFromForm(message({
+            host: 'https://xy12345.us-east-1.snowflakecomputing.com/', warehouse: 'WH', user: 'alice'
+        }), 'id-1');
+        expect(connection.url).toBe('xy12345.us-east-1');
     });
 
     it('carries warehouse, role, and catalog/schema through to the stored connection', () => {

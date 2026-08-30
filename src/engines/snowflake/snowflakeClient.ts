@@ -289,7 +289,7 @@ export class SnowflakeClient implements SqlClient {
 
         const api = loadSnowflakeApi();
         const conn = api.createConnection({
-            account: this.connection.url,
+            account: normalizeAccountIdentifier(this.connection.url),
             username: this.connection.user,
             password,
             authenticator: isExternalBrowser ? 'EXTERNALBROWSER' : undefined,
@@ -314,6 +314,24 @@ export class SnowflakeClient implements SqlClient {
             await new Promise<void>(resolve => conn.destroy(() => resolve()));
         }
     }
+}
+
+/**
+ * Strips a pasted full URL down to the bare account identifier Snowflake
+ * expects (e.g. `xy12345.us-east-1`, not `https://xy12345.us-east-1.snowflakecomputing.com/`).
+ * Passing the full URL through as `account` is a very natural mistake — it's
+ * exactly what shows in the browser bar for Snowsight — but it breaks SSO
+ * outright: the identity-provider lookup is keyed off this exact string, and
+ * a malformed one surfaces as Snowflake's generic, unhelpful "error related
+ * to the SAML Identity Provider account parameter" rather than anything that
+ * names the actual problem.
+ */
+export function normalizeAccountIdentifier(input: string): string {
+    return input
+        .trim()
+        .replace(/^[a-z][a-z0-9+.-]*:\/\//i, '')
+        .replace(/\/.*$/, '')
+        .replace(/\.snowflakecomputing\.com$/i, '');
 }
 
 function asSnowflakeError(error: unknown): Error {

@@ -21,6 +21,7 @@ import { hostAndPort } from './engines/postgres/postgresClient';
 import { expandPastedSupabaseUrl } from './engines/supabase/supabaseUrls';
 import { expandPastedMongoUrl, isMongoConnectionString } from './engines/mongodb/mongodbUrls';
 import { mongoHostAndPort } from './engines/mongodb/mongodbClient';
+import { normalizeAccountIdentifier } from './engines/snowflake/snowflakeClient';
 import { formatHost, previewRowLimit, quoteIdentifier, showConnectionError, summarize } from './util';
 
 export async function pickConnection(store: ConnectionStore, placeHolder: string): Promise<StoredConnection | undefined> {
@@ -441,7 +442,9 @@ export function connectionFromForm(request: ConnectionMessage, id: string): Stor
             name: request.name.trim() || defaultName,
             type: 'snowflake',
             // No host/port — Snowflake is addressed by account identifier alone.
-            url: request.host.trim(),
+            // Stripped down from whatever was pasted (a full https://...snowflakecomputing.com
+            // URL is a natural paste, but breaks SSO's identity-provider lookup outright).
+            url: normalizeAccountIdentifier(request.host),
             user: request.user.trim(),
             // A Snowflake connection can reference any database the role can see
             // directly from SQL, so an empty field means "all of them", like MySQL.
