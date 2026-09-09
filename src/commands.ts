@@ -526,7 +526,10 @@ export async function showConnectionWindow(
     provider: TrinoExplorerProvider,
     existing: StoredConnection | undefined
 ): Promise<void> {
-    const engine = engineOf(existing ?? { type: 'trino' } as StoredConnection);
+    // Adding a brand new connection (no `existing`) opens on Postgres — the
+    // form's first tab and the most common engine here — rather than Trino,
+    // which this extension started as but is no longer the default case.
+    const engine = engineOf(existing ?? { type: 'postgres' } as StoredConnection);
     const isLocalFile = engine === 'sqlite' || engine === 'duckdb';
     const isSnowflake = engine === 'snowflake';
     const wireProtocol = !isLocalFile && addressesByDatabase(engine);

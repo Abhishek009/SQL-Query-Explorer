@@ -118,3 +118,20 @@ describe('Snowflake tab: install banner', () => {
         expect(button.hidden).toBe(true);
     });
 });
+
+describe('Server Type tab order', () => {
+    it('lists PostgreSQL before Trino, matching Postgres now being the default', () => {
+        const { window } = renderInJsdom(buildValues({ engine: 'postgres' }));
+        const engines = [...window.document.querySelectorAll('.tabs .tab')].map(tab => (tab as unknown as HTMLElement).dataset.engine);
+        expect(engines.indexOf('postgres')).toBeLessThan(engines.indexOf('trino'));
+        expect(engines[0]).toBe('postgres');
+    });
+
+    it('still correctly identifies Trino as active when its own connection is edited', () => {
+        const { window } = renderInJsdom(buildValues({ engine: 'trino' }));
+        const trinoTab = window.document.querySelector('.tab[data-engine="trino"]') as unknown as HTMLElement;
+        const postgresTab = window.document.querySelector('.tab[data-engine="postgres"]') as unknown as HTMLElement;
+        expect(trinoTab.className).toContain('active');
+        expect(postgresTab.className).not.toContain('active');
+    });
+});

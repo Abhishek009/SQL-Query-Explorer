@@ -21,7 +21,7 @@ Supports **[Trino](https://trino.io)**, **[PostgreSQL](https://www.postgresql.or
 ## Features
 
 ### Connections
-- **Pick the engine when adding a connection** — Trino, PostgreSQL, Supabase, SQLite, DuckDB, MySQL, MariaDB, MongoDB, or Snowflake — and the form shows only the fields that engine needs.
+- **Pick the engine when adding a connection** — PostgreSQL, Trino, Supabase, SQLite, DuckDB, MySQL, MariaDB, MongoDB, or Snowflake — and the form shows only the fields that engine needs. PostgreSQL is the first tab and the default when you open **Add Connection**.
 - **Test Connection** runs a real query against the details you typed, before saving anything.
 - **Manage several servers at once** — dev, staging, and production sit side by side in the **Connections** view. Add one with the **+** button, then edit, remove, or refresh each from its context menu.
 - One connection is **active** for queries at a time; right-click → **Use Connection for Queries** to switch.

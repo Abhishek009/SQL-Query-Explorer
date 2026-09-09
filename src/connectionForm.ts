@@ -242,8 +242,8 @@ button:focus-visible{outline:2px solid var(--vscode-focusBorder,#2f7ce0);outline
   <div id="error" class="alert" role="alert"></div>
   <p class="tabs-label">Server Type</p>
   <div class="tabs" role="tablist">
-    <button type="button" class="tab${tab(isTrino)}" data-pane="trino" data-engine="trino" role="tab" aria-selected="${selected(isTrino)}"><span class="tab-icon" style="background:#dd4b39">T</span>Trino</button>
     <button type="button" class="tab${tab(isPostgres)}" data-pane="postgres" data-engine="postgres" role="tab" aria-selected="${selected(isPostgres)}"><span class="tab-icon" style="background:#336791">P</span>PostgreSQL</button>
+    <button type="button" class="tab${tab(isTrino)}" data-pane="trino" data-engine="trino" role="tab" aria-selected="${selected(isTrino)}"><span class="tab-icon" style="background:#dd4b39">T</span>Trino</button>
     <button type="button" class="tab${tab(isSupabase)}" data-pane="supabase" data-engine="supabase" role="tab" aria-selected="${selected(isSupabase)}"><span class="tab-icon" style="background:#3ecf8e">⚡</span>Supabase</button>
     <button type="button" class="tab${tab(isSqlite)}" data-pane="sqlite" data-engine="sqlite" role="tab" aria-selected="${selected(isSqlite)}"><span class="tab-icon" style="background:#003b57">L</span>SQLite</button>
     <button type="button" class="tab${tab(isDuckdb)}" data-pane="duckdb" data-engine="duckdb" role="tab" aria-selected="${selected(isDuckdb)}"><span class="tab-icon" style="background:#fff000;color:#000">D</span>DuckDB</button>
@@ -253,9 +253,9 @@ button:focus-visible{outline:2px solid var(--vscode-focusBorder,#2f7ce0);outline
     <button type="button" class="tab${tab(isSnowflake)}" data-pane="snowflake" data-engine="snowflake" role="tab" aria-selected="${selected(isSnowflake)}"><span class="tab-icon" style="background:#29b5e8">❄</span>Snowflake</button>
   </div>
   <form id="connection">
-   <div class="pane${tab(isTrino)}" data-pane="trino">${trinoFieldsHtml(trinoValues, passwordHint, hasPassword)}
-   </div>
    <div class="pane${tab(isPostgres)}" data-pane="postgres">${postgresFieldsHtml(postgresValues, passwordHint, hasPassword)}
+   </div>
+   <div class="pane${tab(isTrino)}" data-pane="trino">${trinoFieldsHtml(trinoValues, passwordHint, hasPassword)}
    </div>
    <div class="pane${tab(isSupabase)}" data-pane="supabase">${supabaseFieldsHtml(supabaseValues, passwordHint, hasPassword)}
    </div>
