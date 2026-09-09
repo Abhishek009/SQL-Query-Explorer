@@ -1,4 +1,4 @@
-import { escapeHtml } from '../../util';
+import { escapeHtml, passwordFieldHtml } from '../../util';
 import type { ConnectionFormData } from '../../connectionForm';
 
 /**
@@ -38,7 +38,7 @@ export function supabaseFieldsHtml(values: ConnectionFormData, passwordHint: str
         </div>
         <div>
           <label class="lbl" for="s-password">Database password</label>
-          <input id="s-password" type="password" autocomplete="new-password" placeholder="${passwordHint}">
+          ${passwordFieldHtml('s-password', passwordHint)}
         </div>
       </div>
       ${forgetRow}

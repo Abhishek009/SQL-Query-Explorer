@@ -135,3 +135,41 @@ describe('Server Type tab order', () => {
         expect(postgresTab.className).not.toContain('active');
     });
 });
+
+describe('password Show/Hide toggle', () => {
+    it('every engine tab has one, wired to its own password field', () => {
+        const prefixes = { trino: 't', postgres: 'p', supabase: 's', mysql: 'm', mariadb: 'a', mongodb: 'g', snowflake: 'f' } as const;
+        for (const [engine, prefix] of Object.entries(prefixes)) {
+            const { window } = renderInJsdom(buildValues({ engine: engine as ConnectionFormData['engine'] }));
+            const toggle = window.document.querySelector(`.password-toggle[data-for="${prefix}-password"]`);
+            expect(toggle, `expected a password toggle for ${engine}`).not.toBeNull();
+        }
+    });
+
+    it('starts masked, and reveals the typed password as plain text on click', () => {
+        const { window } = renderInJsdom(buildValues({ engine: 'postgres' }));
+        const input = window.document.getElementById('p-password') as unknown as HTMLInputElement;
+        const toggle = window.document.querySelector('.password-toggle[data-for="p-password"]') as unknown as HTMLElement;
+        input.value = 'hunter2';
+        expect(input.type).toBe('password');
+        expect(toggle.textContent).toBe('Show');
+
+        toggle.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+        expect(input.type).toBe('text');
+        expect(input.value).toBe('hunter2');
+        expect(toggle.textContent).toBe('Hide');
+
+        toggle.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+        expect(input.type).toBe('password');
+        expect(toggle.textContent).toBe('Show');
+    });
+
+    it('each engine\'s toggle only affects its own field, not another tab\'s', () => {
+        const { window } = renderInJsdom(buildValues({ engine: 'mysql' }));
+        const mysqlToggle = window.document.querySelector('.password-toggle[data-for="m-password"]') as unknown as HTMLElement;
+        mysqlToggle.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+        expect((window.document.getElementById('m-password') as unknown as HTMLInputElement).type).toBe('text');
+        expect((window.document.getElementById('t-password') as unknown as HTMLInputElement).type).toBe('password');
+        expect((window.document.getElementById('p-password') as unknown as HTMLInputElement).type).toBe('password');
+    });
+});

@@ -1,4 +1,4 @@
-import { escapeHtml } from '../../util';
+import { escapeHtml, passwordFieldHtml } from '../../util';
 import type { ConnectionFormData } from '../../connectionForm';
 
 /** MongoDB's field set — a pasted mongodb:// or mongodb+srv:// string in Host fills the rest in, see mongodbUrls.ts. */
@@ -31,7 +31,7 @@ export function mongodbFieldsHtml(values: ConnectionFormData, passwordHint: stri
         </div>
         <div>
           <label class="lbl" for="g-password">Password</label>
-          <input id="g-password" type="password" autocomplete="new-password" placeholder="${passwordHint}">
+          ${passwordFieldHtml('g-password', passwordHint)}
         </div>
       </div>
       ${forgetRow}

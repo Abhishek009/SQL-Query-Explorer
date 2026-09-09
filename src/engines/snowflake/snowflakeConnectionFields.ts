@@ -1,4 +1,4 @@
-import { escapeHtml } from '../../util';
+import { escapeHtml, passwordFieldHtml } from '../../util';
 import type { ConnectionFormData } from '../../connectionForm';
 
 /**
@@ -41,7 +41,7 @@ export function snowflakeFieldsHtml(values: ConnectionFormData, passwordHint: st
         </div>
         <div id="f-password-field" ${isExternalBrowser ? 'hidden' : ''}>
           <label class="lbl" for="f-password">Password</label>
-          <input id="f-password" type="password" autocomplete="new-password" placeholder="${passwordHint}">
+          ${passwordFieldHtml('f-password', passwordHint)}
         </div>
       </div>
       <div id="f-forget-row" ${isExternalBrowser ? 'hidden' : ''}>${forgetRow}</div>

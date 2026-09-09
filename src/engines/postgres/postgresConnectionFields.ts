@@ -1,4 +1,4 @@
-import { escapeHtml } from '../../util';
+import { escapeHtml, passwordFieldHtml } from '../../util';
 import type { ConnectionFormData } from '../../connectionForm';
 
 /** PostgreSQL's field set — independent of Trino's, see the note in trinoConnectionFields.ts. */
@@ -30,7 +30,7 @@ export function postgresFieldsHtml(values: ConnectionFormData, passwordHint: str
         </div>
         <div>
           <label class="lbl" for="p-password">Password</label>
-          <input id="p-password" type="password" autocomplete="new-password" placeholder="${passwordHint}">
+          ${passwordFieldHtml('p-password', passwordHint)}
         </div>
       </div>
       ${forgetRow}

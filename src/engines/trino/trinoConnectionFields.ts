@@ -1,4 +1,4 @@
-import { escapeHtml } from '../../util';
+import { escapeHtml, passwordFieldHtml } from '../../util';
 import type { ConnectionFormData } from '../../connectionForm';
 
 /**
@@ -34,7 +34,7 @@ export function trinoFieldsHtml(values: ConnectionFormData, passwordHint: string
         </div>
         <div>
           <label class="lbl" for="t-password">Password</label>
-          <input id="t-password" type="password" autocomplete="new-password" placeholder="${passwordHint}">
+          ${passwordFieldHtml('t-password', passwordHint)}
         </div>
       </div>
       ${forgetRow}

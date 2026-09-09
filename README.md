@@ -34,7 +34,7 @@ Supports **[Trino](https://trino.io)**, **[PostgreSQL](https://www.postgresql.or
 - **MariaDB** gets its own tab as well, identical in shape to MySQL's and backed by the same client — it's the same wire protocol underneath. See [MariaDB connections](#mariadb-connections).
 - **MongoDB** gets its own tab too, and is the one engine here that doesn't speak SQL — the editor takes Mongo shell syntax instead (`db.collection.find({...})`). See [MongoDB connections](#mongodb-connections).
 - **Snowflake** gets its own tab, addressed by account identifier rather than host/port, with a choice of username/password or browser-based SSO — see [Snowflake connections](#snowflake-connections).
-- Passwords are stored in **VS Code Secret Storage**, never in `settings.json`.
+- Passwords are stored in **VS Code Secret Storage**, never in `settings.json`. Every password field has a **Show/Hide** toggle to check what you typed before saving.
 - Trino traffic goes through the `/v1/statement` REST endpoint; PostgreSQL, Supabase, MySQL, MariaDB, MongoDB, and Snowflake use their native wire protocols; SQLite and DuckDB open their file directly on disk.
 - For PostgreSQL, Supabase, MySQL, MariaDB, MongoDB, and Snowflake the tree's top level lists **databases** on the server, so siblings of the one you opened are browsable too. For SQLite and DuckDB the file itself is the only database, so the tree goes straight to its tables and views.
 

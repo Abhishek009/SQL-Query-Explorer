@@ -169,6 +169,10 @@ input:focus{outline:none;border-color:var(--vscode-focusBorder,#2f7ce0);box-shad
 .hint{margin:5px 0 0;font-size:.87em;color:var(--vscode-descriptionForeground);line-height:1.4}
 .radio-row{display:flex;gap:16px;margin-top:4px;flex-wrap:wrap}
 .radio-row label{display:flex;align-items:center;gap:6px;font-weight:400;cursor:pointer}
+.password-wrap{position:relative}
+.password-wrap input{padding-right:56px}
+.password-toggle{position:absolute;top:1px;right:1px;bottom:1px;padding:0 10px;font-size:.82em;font-weight:600;color:var(--vscode-descriptionForeground);background:transparent;border:0;border-radius:0 3px 3px 0;cursor:pointer}
+.password-toggle:hover{color:var(--vscode-foreground);background:var(--vscode-toolbar-hoverBackground,rgba(128,128,128,.16))}
 .row{display:grid;grid-template-columns:minmax(0,1fr) 110px;gap:10px}
 .row-eq{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .switch{display:flex;align-items:center;gap:10px;cursor:pointer;user-select:none;margin:var(--gap) 0 0}
@@ -471,6 +475,15 @@ document.querySelectorAll('input[name="f-authMethod"]').forEach(radio=>radio.add
   byId('f-forget-row').hidden=isBrowser;
   byId('f-browser-hint').hidden=!isBrowser;
 }));
+document.querySelectorAll('.password-toggle').forEach(toggle=>{
+  const input=byId(toggle.dataset.for);
+  toggle.addEventListener('click',()=>{
+    const hidden=input.type==='password';
+    input.type=hidden?'text':'password';
+    toggle.textContent=hidden?'Hide':'Show';
+    toggle.setAttribute('aria-label',hidden?'Hide password':'Show password');
+  });
+});
 const focusIds={trino:'t-host',postgres:'p-host',supabase:'s-host',sqlite:'l-file',duckdb:'d-file',mysql:'m-host',mongodb:'g-host',mariadb:'a-host',snowflake:'f-host'};
 byId(focusIds[engine]).focus();`;
 

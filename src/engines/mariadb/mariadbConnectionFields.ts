@@ -1,4 +1,4 @@
-import { escapeHtml } from '../../util';
+import { escapeHtml, passwordFieldHtml } from '../../util';
 import type { ConnectionFormData } from '../../connectionForm';
 
 /** MariaDB's field set — identical shape to MySQL's, since it's the same wire protocol underneath. */
@@ -30,7 +30,7 @@ export function mariadbFieldsHtml(values: ConnectionFormData, passwordHint: stri
         </div>
         <div>
           <label class="lbl" for="a-password">Password</label>
-          <input id="a-password" type="password" autocomplete="new-password" placeholder="${passwordHint}">
+          ${passwordFieldHtml('a-password', passwordHint)}
         </div>
       </div>
       ${forgetRow}

@@ -1,4 +1,4 @@
-import { escapeHtml } from '../../util';
+import { escapeHtml, passwordFieldHtml } from '../../util';
 import type { ConnectionFormData } from '../../connectionForm';
 
 /** MySQL's field set — independent of Postgres's, see the note in trinoConnectionFields.ts. */
@@ -30,7 +30,7 @@ export function mysqlFieldsHtml(values: ConnectionFormData, passwordHint: string
         </div>
         <div>
           <label class="lbl" for="m-password">Password</label>
-          <input id="m-password" type="password" autocomplete="new-password" placeholder="${passwordHint}">
+          ${passwordFieldHtml('m-password', passwordHint)}
         </div>
       </div>
       ${forgetRow}

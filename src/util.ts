@@ -26,6 +26,15 @@ export function escapeHtml(value: string): string {
     return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 }
 
+/**
+ * A password input with a Show/Hide toggle button, shared by every engine's
+ * Connect To DB tab so the interaction (and its one shared listener, wired up
+ * once in connectionForm.ts's own script) only needs writing once.
+ */
+export function passwordFieldHtml(id: string, placeholder: string): string {
+    return `<div class="password-wrap"><input id="${id}" type="password" autocomplete="new-password" placeholder="${escapeHtml(placeholder)}"><button type="button" class="password-toggle" data-for="${id}" aria-label="Show password">Show</button></div>`;
+}
+
 export function quoteIdentifier(identifier: string): string {
     return `"${identifier.replace(/"/g, '""')}"`;
 }
