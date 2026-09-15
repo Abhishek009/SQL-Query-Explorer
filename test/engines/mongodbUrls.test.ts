@@ -7,7 +7,7 @@ function message(overrides: Partial<ConnectionMessage> = {}): ConnectionMessage 
     return {
         type: 'save', engine: 'mongodb', name: '', host: '', port: '', sslEnabled: false, sslVerify: true,
         user: '', catalog: '', schema: '', database: '', file: '', maxRows: '',
-        password: '', clearPassword: false, connect: false,
+        password: '', savePassword: true, connect: false,
         ...overrides
     };
 }

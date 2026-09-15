@@ -9,7 +9,7 @@ function message(overrides: Partial<ConnectionMessage> = {}): ConnectionMessage 
         type: 'save', engine: 'snowflake', name: '', host: '', port: '', sslEnabled: false, sslVerify: true,
         user: '', catalog: '', schema: '', database: '', file: '', maxRows: '',
         warehouse: '', role: '', authMethod: 'password',
-        password: '', clearPassword: false, connect: false,
+        password: '', savePassword: true, connect: false,
         ...overrides
     };
 }

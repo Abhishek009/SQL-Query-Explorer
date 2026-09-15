@@ -6,7 +6,7 @@ import type { ConnectionFormData } from '../src/connectionForm';
 function buildValues(overrides: Partial<ConnectionFormData> = {}): ConnectionFormData {
     return {
         name: '', engine: 'snowflake', host: '', port: '', sslEnabled: false, sslVerify: true,
-        user: '', catalog: '', schema: '', database: '', file: '', maxRows: '',
+        user: '', password: '', catalog: '', schema: '', database: '', file: '', maxRows: '',
         warehouse: '', role: '', authMethod: 'password',
         ...overrides
     };
