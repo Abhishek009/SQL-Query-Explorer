@@ -1,6 +1,11 @@
-# Dev-only editor config
+# Dev-only editor/tooling config
 .vscode/**
 .vscode-test/**
+docker-compose*.yml
+
+# Driver log files a live-tested engine (e.g. snowflake-sdk) can write to the
+# repo root during manual testing — never intentional output, never shipped.
+*.log
 
 # TypeScript sources — only the bundle in dist/ is executed.
 # Its source map is kept so user-reported stack traces stay readable.

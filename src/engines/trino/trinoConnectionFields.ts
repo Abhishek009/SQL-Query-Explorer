@@ -1,4 +1,4 @@
-import { escapeHtml, passwordFieldHtml } from '../../util';
+import { escapeHtml, passwordFieldHtml, savePasswordRowHtml } from '../../util';
 import type { ConnectionFormData } from '../../connectionForm';
 
 /**
@@ -6,10 +6,8 @@ import type { ConnectionFormData } from '../../connectionForm';
  * an engine-specific addition — a token-auth toggle, say — only ever touches
  * this one file.
  */
-export function trinoFieldsHtml(values: ConnectionFormData, passwordHint: string, hasPassword: boolean): string {
-    const forgetRow = hasPassword
-        ? '<label class="switch small"><input id="t-clearPassword" type="checkbox"><span class="track"></span><span class="switch-label">Forget the saved password</span></label>'
-        : '<input id="t-clearPassword" type="checkbox" hidden>';
+export function trinoFieldsHtml(values: ConnectionFormData, passwordHint: string, savePasswordChecked: boolean): string {
+    const saveRow = savePasswordRowHtml('t-savePassword', savePasswordChecked);
     const advancedOpen = values.maxRows ? ' open' : '';
     return `
     <section class="card compact">
@@ -34,10 +32,12 @@ export function trinoFieldsHtml(values: ConnectionFormData, passwordHint: string
         </div>
         <div>
           <label class="lbl" for="t-password">Password</label>
-          ${passwordFieldHtml('t-password', passwordHint)}
+          ${passwordFieldHtml('t-password', passwordHint, values.password)}
         </div>
       </div>
-      ${forgetRow}
+      <div class="field">
+        ${saveRow}
+      </div>
       <div class="field row-eq">
         <div>
           <label class="lbl" for="t-catalog">Default catalog</label>

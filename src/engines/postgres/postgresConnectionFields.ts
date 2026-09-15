@@ -1,11 +1,9 @@
-import { escapeHtml, passwordFieldHtml } from '../../util';
+import { escapeHtml, passwordFieldHtml, savePasswordRowHtml } from '../../util';
 import type { ConnectionFormData } from '../../connectionForm';
 
 /** PostgreSQL's field set — independent of Trino's, see the note in trinoConnectionFields.ts. */
-export function postgresFieldsHtml(values: ConnectionFormData, passwordHint: string, hasPassword: boolean): string {
-    const forgetRow = hasPassword
-        ? '<label class="switch small"><input id="p-clearPassword" type="checkbox"><span class="track"></span><span class="switch-label">Forget the saved password</span></label>'
-        : '<input id="p-clearPassword" type="checkbox" hidden>';
+export function postgresFieldsHtml(values: ConnectionFormData, passwordHint: string, savePasswordChecked: boolean): string {
+    const saveRow = savePasswordRowHtml('p-savePassword', savePasswordChecked);
     const advancedOpen = values.maxRows ? ' open' : '';
     return `
     <section class="card compact">
@@ -30,10 +28,12 @@ export function postgresFieldsHtml(values: ConnectionFormData, passwordHint: str
         </div>
         <div>
           <label class="lbl" for="p-password">Password</label>
-          ${passwordFieldHtml('p-password', passwordHint)}
+          ${passwordFieldHtml('p-password', passwordHint, values.password)}
         </div>
       </div>
-      ${forgetRow}
+      <div class="field">
+        ${saveRow}
+      </div>
       <div class="field">
         <label class="lbl" for="p-database">Database</label>
         <input id="p-database" value="${escapeHtml(values.database)}" placeholder="postgres">

@@ -57,3 +57,6 @@ temp/
 .sqlite-test-cache/
 .duckdb-test-cache/
 .snowflake-test-cache/
+test/engines/mongodbUrls.test.ts
+test/snowflakeConnection.test.ts
+test/connectionForm.test.ts

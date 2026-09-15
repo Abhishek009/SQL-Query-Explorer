@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { randomUUID } from 'crypto';
 import { StoredConnection } from './types';
+import { forgetSession } from './sessionSecrets';
 
 export const LEGACY_PASSWORD_KEY = 'trino.connection.password';
 
@@ -46,6 +47,7 @@ export class ConnectionStore {
     public async remove(id: string): Promise<void> {
         await this.write(this.all().filter(connection => connection.id !== id));
         await this.context.secrets.delete(passwordKey(id));
+        forgetSession(id);
         if (this.activeId === id) { await this.setActive(undefined); }
     }
 

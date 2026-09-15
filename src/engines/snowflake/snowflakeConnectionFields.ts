@@ -1,4 +1,4 @@
-import { escapeHtml, passwordFieldHtml } from '../../util';
+import { escapeHtml, passwordFieldHtml, savePasswordRowHtml } from '../../util';
 import type { ConnectionFormData } from '../../connectionForm';
 
 /**
@@ -7,10 +7,8 @@ import type { ConnectionFormData } from '../../connectionForm';
  * warehouse and an authentication method, neither of which any other engine
  * here has.
  */
-export function snowflakeFieldsHtml(values: ConnectionFormData, passwordHint: string, hasPassword: boolean): string {
-    const forgetRow = hasPassword
-        ? '<label class="switch small"><input id="f-clearPassword" type="checkbox"><span class="track"></span><span class="switch-label">Forget the saved password</span></label>'
-        : '<input id="f-clearPassword" type="checkbox" hidden>';
+export function snowflakeFieldsHtml(values: ConnectionFormData, passwordHint: string, savePasswordChecked: boolean): string {
+    const saveRow = savePasswordRowHtml('f-savePassword', savePasswordChecked);
     const advancedOpen = values.maxRows ? ' open' : '';
     const isExternalBrowser = values.authMethod === 'externalbrowser';
     return `
@@ -41,10 +39,10 @@ export function snowflakeFieldsHtml(values: ConnectionFormData, passwordHint: st
         </div>
         <div id="f-password-field" ${isExternalBrowser ? 'hidden' : ''}>
           <label class="lbl" for="f-password">Password</label>
-          ${passwordFieldHtml('f-password', passwordHint)}
+          ${passwordFieldHtml('f-password', passwordHint, values.password)}
         </div>
       </div>
-      <div id="f-forget-row" ${isExternalBrowser ? 'hidden' : ''}>${forgetRow}</div>
+      <div id="f-forget-row" class="field" ${isExternalBrowser ? 'hidden' : ''}>${saveRow}</div>
       <p class="hint" id="f-browser-hint" ${isExternalBrowser ? '' : 'hidden'}>Save &amp; Connect opens your system browser to sign in through your identity provider. No password is stored for this connection.</p>
       <div class="field">
         <label class="lbl" for="f-warehouse">Warehouse<span class="req">*</span></label>

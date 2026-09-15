@@ -31,8 +31,17 @@ export function escapeHtml(value: string): string {
  * Connect To DB tab so the interaction (and its one shared listener, wired up
  * once in connectionForm.ts's own script) only needs writing once.
  */
-export function passwordFieldHtml(id: string, placeholder: string): string {
-    return `<div class="password-wrap"><input id="${id}" type="password" autocomplete="new-password" placeholder="${escapeHtml(placeholder)}"><button type="button" class="password-toggle" data-for="${id}" aria-label="Show password">Show</button></div>`;
+export function passwordFieldHtml(id: string, placeholder: string, value: string = ''): string {
+    return `<div class="password-wrap"><input id="${id}" type="password" autocomplete="new-password" placeholder="${escapeHtml(placeholder)}" value="${escapeHtml(value)}"><button type="button" class="password-toggle" data-for="${id}" aria-label="Show password">Show</button></div>`;
+}
+
+/**
+ * Checked by default: leaving it on keeps today's implicit behavior (a typed
+ * password is remembered in Secret Storage). Unchecking it keeps the password
+ * usable for this window's session only, never written to disk.
+ */
+export function savePasswordRowHtml(id: string, checked: boolean): string {
+    return `<label class="switch small"><input id="${id}" type="checkbox" ${checked ? 'checked' : ''}><span class="track"></span><span class="switch-label">Save password</span></label>`;
 }
 
 export function quoteIdentifier(identifier: string): string {

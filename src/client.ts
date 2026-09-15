@@ -8,6 +8,7 @@ import { DuckdbClient } from './engines/duckdb/duckdbClient';
 import { MySqlClient } from './engines/mysql/mysqlClient';
 import { MongodbClient } from './engines/mongodb/mongodbClient';
 import { SnowflakeClient } from './engines/snowflake/snowflakeClient';
+import { sessionPassword } from './sessionSecrets';
 
 /**
  * What the explorer, completion, and query commands need from an engine. Every
@@ -93,6 +94,9 @@ export function createClient(
     /** Used when testing details that have not been saved to Secret Storage yet. */
     password?: string
 ): SqlClient {
+    // A password the user chose not to persist ("Save password" unchecked) lives only
+    // in this window's session cache — fall back to it before Secret Storage.
+    password = password ?? sessionPassword(connection.id);
     switch (engineOf(connection)) {
         case 'sqlite': return new SqliteClient(secrets, connection, registry, password);
         case 'duckdb': return new DuckdbClient(secrets, connection);

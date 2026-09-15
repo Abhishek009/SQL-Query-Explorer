@@ -1,11 +1,9 @@
-import { escapeHtml, passwordFieldHtml } from '../../util';
+import { escapeHtml, passwordFieldHtml, savePasswordRowHtml } from '../../util';
 import type { ConnectionFormData } from '../../connectionForm';
 
 /** MariaDB's field set — identical shape to MySQL's, since it's the same wire protocol underneath. */
-export function mariadbFieldsHtml(values: ConnectionFormData, passwordHint: string, hasPassword: boolean): string {
-    const forgetRow = hasPassword
-        ? '<label class="switch small"><input id="a-clearPassword" type="checkbox"><span class="track"></span><span class="switch-label">Forget the saved password</span></label>'
-        : '<input id="a-clearPassword" type="checkbox" hidden>';
+export function mariadbFieldsHtml(values: ConnectionFormData, passwordHint: string, savePasswordChecked: boolean): string {
+    const saveRow = savePasswordRowHtml('a-savePassword', savePasswordChecked);
     const advancedOpen = values.maxRows ? ' open' : '';
     return `
     <section class="card compact">
@@ -30,10 +28,12 @@ export function mariadbFieldsHtml(values: ConnectionFormData, passwordHint: stri
         </div>
         <div>
           <label class="lbl" for="a-password">Password</label>
-          ${passwordFieldHtml('a-password', passwordHint)}
+          ${passwordFieldHtml('a-password', passwordHint, values.password)}
         </div>
       </div>
-      ${forgetRow}
+      <div class="field">
+        ${saveRow}
+      </div>
       <div class="field">
         <label class="lbl" for="a-database">Default database</label>
         <input id="a-database" value="${escapeHtml(values.database)}" placeholder="Leave blank to browse every database on the server">

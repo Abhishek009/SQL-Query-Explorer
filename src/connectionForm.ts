@@ -18,6 +18,8 @@ export interface ConnectionFormData {
     /** Trino only: whether to verify the server's TLS certificate. */
     sslVerify: boolean;
     user: string;
+    /** The connection's current password, saved or session-only — blank if none. Used both to prefill the field on Edit and, on submit, as the value to save. */
+    password: string;
     catalog: string;
     schema: string;
     database: string;
@@ -35,8 +37,8 @@ export interface ConnectionFormData {
 export interface ConnectionMessage extends ConnectionFormData {
     /** `save` stores the connection; `test` only checks that it works. */
     type: 'save' | 'test';
-    password: string;
-    clearPassword: boolean;
+    /** Unchecked keeps a typed password usable for this window's session only, never written to Secret Storage. */
+    savePassword: boolean;
     connect: boolean;
 }
 
@@ -128,13 +130,20 @@ export function validateConnection(value: ConnectionMessage): string | undefined
 
 const BLANK: ConnectionFormData = {
     name: '', engine: 'trino', host: '', port: '', sslEnabled: false, sslVerify: true,
-    user: '', catalog: '', schema: '', database: '', file: '', maxRows: '',
+    user: '', password: '', catalog: '', schema: '', database: '', file: '', maxRows: '',
     warehouse: '', role: '', authMethod: 'password'
 };
 
-export function connectionFormHtml(webview: vscode.Webview, values: ConnectionFormData, isEdit: boolean, hasPassword: boolean): string {
+export function connectionFormHtml(
+    webview: vscode.Webview, values: ConnectionFormData, isEdit: boolean,
+    /** Whether a current password (if any) is actually persisted to Secret Storage, vs. session-only — decides the "Save password" checkbox's starting state. */
+    passwordSaved: boolean
+): string {
     const nonce = String(Date.now());
-    const passwordHint = hasPassword ? 'Leave blank to keep the saved password' : 'Optional';
+    const passwordHint = 'Optional';
+    // A password that only lives in this window's session (not yet on disk) should
+    // not look saved by default — otherwise re-saving with no changes would silently persist it.
+    const savePasswordChecked = !values.password || passwordSaved;
     // Only the active engine's pane gets the real values; the other starts
     // blank rather than showing data that belongs to a different connection.
     const trinoValues = values.engine === 'trino' ? values : { ...BLANK, engine: 'trino' as const };
@@ -257,23 +266,23 @@ button:focus-visible{outline:2px solid var(--vscode-focusBorder,#2f7ce0);outline
     <button type="button" class="tab${tab(isSnowflake)}" data-pane="snowflake" data-engine="snowflake" role="tab" aria-selected="${selected(isSnowflake)}"><span class="tab-icon" style="background:#29b5e8">❄</span>Snowflake</button>
   </div>
   <form id="connection">
-   <div class="pane${tab(isPostgres)}" data-pane="postgres">${postgresFieldsHtml(postgresValues, passwordHint, hasPassword)}
+   <div class="pane${tab(isPostgres)}" data-pane="postgres">${postgresFieldsHtml(postgresValues, passwordHint, savePasswordChecked)}
    </div>
-   <div class="pane${tab(isTrino)}" data-pane="trino">${trinoFieldsHtml(trinoValues, passwordHint, hasPassword)}
+   <div class="pane${tab(isTrino)}" data-pane="trino">${trinoFieldsHtml(trinoValues, passwordHint, savePasswordChecked)}
    </div>
-   <div class="pane${tab(isSupabase)}" data-pane="supabase">${supabaseFieldsHtml(supabaseValues, passwordHint, hasPassword)}
+   <div class="pane${tab(isSupabase)}" data-pane="supabase">${supabaseFieldsHtml(supabaseValues, passwordHint, savePasswordChecked)}
    </div>
    <div class="pane${tab(isSqlite)}" data-pane="sqlite">${sqliteFieldsHtml(sqliteValues)}
    </div>
    <div class="pane${tab(isDuckdb)}" data-pane="duckdb">${duckdbFieldsHtml(duckdbValues)}
    </div>
-   <div class="pane${tab(isMysql)}" data-pane="mysql">${mysqlFieldsHtml(mysqlValues, passwordHint, hasPassword)}
+   <div class="pane${tab(isMysql)}" data-pane="mysql">${mysqlFieldsHtml(mysqlValues, passwordHint, savePasswordChecked)}
    </div>
-   <div class="pane${tab(isMongodb)}" data-pane="mongodb">${mongodbFieldsHtml(mongodbValues, passwordHint, hasPassword)}
+   <div class="pane${tab(isMongodb)}" data-pane="mongodb">${mongodbFieldsHtml(mongodbValues, passwordHint, savePasswordChecked)}
    </div>
-   <div class="pane${tab(isMariadb)}" data-pane="mariadb">${mariadbFieldsHtml(mariadbValues, passwordHint, hasPassword)}
+   <div class="pane${tab(isMariadb)}" data-pane="mariadb">${mariadbFieldsHtml(mariadbValues, passwordHint, savePasswordChecked)}
    </div>
-   <div class="pane${tab(isSnowflake)}" data-pane="snowflake">${snowflakeFieldsHtml(snowflakeValues, passwordHint, hasPassword)}
+   <div class="pane${tab(isSnowflake)}" data-pane="snowflake">${snowflakeFieldsHtml(snowflakeValues, passwordHint, savePasswordChecked)}
    </div>
    <div id="result" class="result" role="status"></div>
   </form>
@@ -306,7 +315,7 @@ function trinoPayload(kind){
   const port=byId('t-port');
   return {type:kind,engine:'trino',name:byId('t-name').value,host:byId('t-host').value,
     port:port.value.trim()||port.placeholder,sslEnabled:byId('t-ssl').checked,sslVerify:byId('t-sslVerify').checked,user:byId('t-user').value,
-    password:byId('t-password').value,clearPassword:byId('t-clearPassword').checked,
+    password:byId('t-password').value,savePassword:byId('t-savePassword').checked,
     catalog:byId('t-catalog').value,schema:byId('t-schema').value,database:'',
     maxRows:byId('t-maxRows').value,connect};
 }
@@ -314,7 +323,7 @@ function postgresPayload(kind){
   const port=byId('p-port');
   return {type:kind,engine:'postgres',name:byId('p-name').value,host:byId('p-host').value,
     port:port.value.trim()||port.placeholder,sslEnabled:byId('p-ssl').checked,sslVerify:true,user:byId('p-user').value,
-    password:byId('p-password').value,clearPassword:byId('p-clearPassword').checked,
+    password:byId('p-password').value,savePassword:byId('p-savePassword').checked,
     catalog:'',schema:'',database:byId('p-database').value,
     maxRows:byId('p-maxRows').value,connect};
 }
@@ -322,25 +331,25 @@ function supabasePayload(kind){
   const port=byId('s-port'), user=byId('s-user');
   return {type:kind,engine:'supabase',name:byId('s-name').value,host:byId('s-host').value,
     port:port.value.trim()||port.placeholder,sslEnabled:byId('s-ssl').checked,sslVerify:true,user:user.value.trim()||user.placeholder,
-    password:byId('s-password').value,clearPassword:byId('s-clearPassword').checked,
+    password:byId('s-password').value,savePassword:byId('s-savePassword').checked,
     catalog:'',schema:'',database:byId('s-database').value,
     maxRows:byId('s-maxRows').value,connect};
 }
 function sqlitePayload(kind){
   return {type:kind,engine:'sqlite',name:byId('l-name').value,host:'',port:'',sslEnabled:false,sslVerify:true,user:'',
-    password:'',clearPassword:false,catalog:'',schema:'',database:'',file:byId('l-file').value,
+    password:'',savePassword:true,catalog:'',schema:'',database:'',file:byId('l-file').value,
     maxRows:byId('l-maxRows').value,connect};
 }
 function duckdbPayload(kind){
   return {type:kind,engine:'duckdb',name:byId('d-name').value,host:'',port:'',sslEnabled:false,sslVerify:true,user:'',
-    password:'',clearPassword:false,catalog:'',schema:'',database:'',file:byId('d-file').value,
+    password:'',savePassword:true,catalog:'',schema:'',database:'',file:byId('d-file').value,
     maxRows:byId('d-maxRows').value,connect};
 }
 function mysqlPayload(kind){
   const port=byId('m-port');
   return {type:kind,engine:'mysql',name:byId('m-name').value,host:byId('m-host').value,
     port:port.value.trim()||port.placeholder,sslEnabled:byId('m-ssl').checked,sslVerify:true,user:byId('m-user').value,
-    password:byId('m-password').value,clearPassword:byId('m-clearPassword').checked,
+    password:byId('m-password').value,savePassword:byId('m-savePassword').checked,
     catalog:'',schema:'',database:byId('m-database').value,
     maxRows:byId('m-maxRows').value,connect};
 }
@@ -348,7 +357,7 @@ function mongodbPayload(kind){
   const port=byId('g-port');
   return {type:kind,engine:'mongodb',name:byId('g-name').value,host:byId('g-host').value,
     port:port.value.trim(),sslEnabled:byId('g-ssl').checked,sslVerify:true,user:byId('g-user').value,
-    password:byId('g-password').value,clearPassword:byId('g-clearPassword').checked,
+    password:byId('g-password').value,savePassword:byId('g-savePassword').checked,
     catalog:'',schema:'',database:byId('g-database').value,
     maxRows:byId('g-maxRows').value,connect};
 }
@@ -356,7 +365,7 @@ function mariadbPayload(kind){
   const port=byId('a-port');
   return {type:kind,engine:'mariadb',name:byId('a-name').value,host:byId('a-host').value,
     port:port.value.trim()||port.placeholder,sslEnabled:byId('a-ssl').checked,sslVerify:true,user:byId('a-user').value,
-    password:byId('a-password').value,clearPassword:byId('a-clearPassword').checked,
+    password:byId('a-password').value,savePassword:byId('a-savePassword').checked,
     catalog:'',schema:'',database:byId('a-database').value,
     maxRows:byId('a-maxRows').value,connect};
 }
@@ -364,7 +373,7 @@ function snowflakePayload(kind){
   const authMethod=document.querySelector('input[name="f-authMethod"]:checked').value;
   return {type:kind,engine:'snowflake',name:byId('f-name').value,host:byId('f-host').value,
     port:'',sslEnabled:true,sslVerify:true,user:byId('f-user').value,
-    password:byId('f-password').value,clearPassword:byId('f-clearPassword').checked,
+    password:byId('f-password').value,savePassword:byId('f-savePassword').checked,
     catalog:byId('f-catalog').value,schema:byId('f-schema').value,database:'',
     warehouse:byId('f-warehouse').value,role:byId('f-role').value,authMethod,
     maxRows:byId('f-maxRows').value,connect};

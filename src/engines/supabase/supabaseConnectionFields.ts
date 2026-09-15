@@ -1,4 +1,4 @@
-import { escapeHtml, passwordFieldHtml } from '../../util';
+import { escapeHtml, passwordFieldHtml, savePasswordRowHtml } from '../../util';
 import type { ConnectionFormData } from '../../connectionForm';
 
 /**
@@ -8,10 +8,8 @@ import type { ConnectionFormData } from '../../connectionForm';
  * defaults (user `postgres`, database `postgres`, SSL on) that match a hosted
  * Supabase project rather than a local server.
  */
-export function supabaseFieldsHtml(values: ConnectionFormData, passwordHint: string, hasPassword: boolean): string {
-    const forgetRow = hasPassword
-        ? '<label class="switch small"><input id="s-clearPassword" type="checkbox"><span class="track"></span><span class="switch-label">Forget the saved password</span></label>'
-        : '<input id="s-clearPassword" type="checkbox" hidden>';
+export function supabaseFieldsHtml(values: ConnectionFormData, passwordHint: string, savePasswordChecked: boolean): string {
+    const saveRow = savePasswordRowHtml('s-savePassword', savePasswordChecked);
     const advancedOpen = values.maxRows ? ' open' : '';
     return `
     <section class="card compact">
@@ -38,10 +36,12 @@ export function supabaseFieldsHtml(values: ConnectionFormData, passwordHint: str
         </div>
         <div>
           <label class="lbl" for="s-password">Database password</label>
-          ${passwordFieldHtml('s-password', passwordHint)}
+          ${passwordFieldHtml('s-password', passwordHint, values.password)}
         </div>
       </div>
-      ${forgetRow}
+      <div class="field">
+        ${saveRow}
+      </div>
       <div class="field">
         <label class="lbl" for="s-database">Database</label>
         <input id="s-database" value="${escapeHtml(values.database)}" placeholder="postgres">

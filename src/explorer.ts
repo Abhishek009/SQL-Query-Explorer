@@ -217,10 +217,10 @@ export class ExplorerItem extends vscode.TreeItem {
     }
 
     public static empty(): ExplorerItem {
-        const item = new ExplorerItem('Add a Trino connection', 'empty');
+        const item = new ExplorerItem('Add a connection', 'empty');
         item.iconPath = new vscode.ThemeIcon('add');
-        item.command = { command: 'sqlExplorer.addConnection', title: 'Add Trino Connection' };
-        item.tooltip = 'Add a Trino coordinator to browse its catalogs.';
+        item.command = { command: 'sqlExplorer.addConnection', title: 'Add Connection' };
+        item.tooltip = 'Add a database connection to browse its catalogs.';
         return item;
     }
 

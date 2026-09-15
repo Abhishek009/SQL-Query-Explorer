@@ -1,11 +1,9 @@
-import { escapeHtml, passwordFieldHtml } from '../../util';
+import { escapeHtml, passwordFieldHtml, savePasswordRowHtml } from '../../util';
 import type { ConnectionFormData } from '../../connectionForm';
 
 /** MySQL's field set — independent of Postgres's, see the note in trinoConnectionFields.ts. */
-export function mysqlFieldsHtml(values: ConnectionFormData, passwordHint: string, hasPassword: boolean): string {
-    const forgetRow = hasPassword
-        ? '<label class="switch small"><input id="m-clearPassword" type="checkbox"><span class="track"></span><span class="switch-label">Forget the saved password</span></label>'
-        : '<input id="m-clearPassword" type="checkbox" hidden>';
+export function mysqlFieldsHtml(values: ConnectionFormData, passwordHint: string, savePasswordChecked: boolean): string {
+    const saveRow = savePasswordRowHtml('m-savePassword', savePasswordChecked);
     const advancedOpen = values.maxRows ? ' open' : '';
     return `
     <section class="card compact">
@@ -30,10 +28,12 @@ export function mysqlFieldsHtml(values: ConnectionFormData, passwordHint: string
         </div>
         <div>
           <label class="lbl" for="m-password">Password</label>
-          ${passwordFieldHtml('m-password', passwordHint)}
+          ${passwordFieldHtml('m-password', passwordHint, values.password)}
         </div>
       </div>
-      ${forgetRow}
+      <div class="field">
+        ${saveRow}
+      </div>
       <div class="field">
         <label class="lbl" for="m-database">Default database</label>
         <input id="m-database" value="${escapeHtml(values.database)}" placeholder="Leave blank to browse every database on the server">

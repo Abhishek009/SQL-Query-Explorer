@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 import * as path from 'path';
 import { ErrorState, ResultsState, StoredConnection, TrinoQueryResult, TrinoRequestError } from './types';
 import { ConnectionStore, passwordKey } from './connectionStore';
+import { forgetSession, rememberForSession, sessionPassword } from './sessionSecrets';
 import { SqlClient, createClient } from './client';
 import { ExplorerItem, TrinoExplorerProvider, qualifiedName } from './explorer';
 import { ResultsSurface, ResultsTabs } from './resultsView';
@@ -552,7 +553,11 @@ export async function showConnectionWindow(
         // Keeps typed-but-unsaved fields intact when the user switches tabs and back.
         { enableScripts: true, retainContextWhenHidden: true }
     );
-    const hasPassword = existing ? Boolean(await context.secrets.get(passwordKey(existing.id))) : false;
+    const savedPassword = existing ? await context.secrets.get(passwordKey(existing.id)) : undefined;
+    const passwordSaved = Boolean(savedPassword);
+    // Prefills the field on Edit with whatever password currently applies —
+    // saved or session-only — rather than leaving it blank.
+    const existingPassword = savedPassword ?? (existing ? sessionPassword(existing.id) : undefined) ?? '';
     panel.webview.html = connectionFormHtml(panel.webview, {
         name: existing?.name ?? '',
         engine,
@@ -561,6 +566,7 @@ export async function showConnectionWindow(
         sslEnabled: current.sslEnabled,
         sslVerify: existing?.sslVerify ?? true,
         user: existing?.user ?? '',
+        password: existingPassword,
         // Snowflake uses catalog/schema directly, like Trino, rather than folding
         // the database into the generic `database` field every other server does.
         catalog: (wireProtocol && !isSnowflake) ? '' : (existing?.catalog ?? ''),
@@ -571,7 +577,7 @@ export async function showConnectionWindow(
         warehouse: existing?.warehouse ?? '',
         role: existing?.role ?? '',
         authMethod: existing?.authenticator ?? 'password'
-    }, Boolean(existing), hasPassword);
+    }, Boolean(existing), passwordSaved);
 
     panel.webview.onDidReceiveMessage(async (message: unknown) => {
         if (isExpandHostMessage(message)) {
@@ -579,7 +585,7 @@ export async function showConnectionWindow(
                 type: 'test', engine: message.engine, name: '', host: message.host, port: message.port,
                 sslEnabled: message.sslEnabled, sslVerify: true, user: message.user,
                 catalog: message.catalog, schema: message.schema, database: message.database,
-                file: '', maxRows: '', password: message.password, clearPassword: false, connect: false,
+                file: '', maxRows: '', password: message.password, savePassword: true, connect: false,
                 warehouse: '', role: '', authMethod: 'password'
             };
             const expanded = message.engine === 'supabase' ? expandPastedSupabaseUrl(asConnectionMessage)
@@ -661,8 +667,21 @@ export async function showConnectionWindow(
         }
 
         await store.save(candidate);
-        if (request.clearPassword) { await context.secrets.delete(passwordKey(id)); }
-        else if (request.password) { await context.secrets.store(passwordKey(id), request.password); }
+        if (request.password) {
+            if (request.savePassword) {
+                await context.secrets.store(passwordKey(id), request.password);
+                forgetSession(id);
+            } else {
+                // "Save password" is off: keep it usable for this window only, never on disk.
+                await context.secrets.delete(passwordKey(id));
+                rememberForSession(id, request.password);
+            }
+        } else {
+            // The password field is prefilled with whatever password currently applies,
+            // so an empty submission means the user deliberately cleared it.
+            await context.secrets.delete(passwordKey(id));
+            forgetSession(id);
+        }
 
         // Editing connection details must not leave a stale pool or file handle around.
         await closeAllClients(id);
