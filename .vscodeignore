@@ -2,6 +2,11 @@
 .vscode/**
 .vscode-test/**
 docker-compose*.yml
+.claude-project-notes.md
+
+# Contributor tooling — packages/installs this very extension, so shipping it
+# inside the package it builds would be circular.
+scripts/**
 
 # Driver log files a live-tested engine (e.g. snowflake-sdk) can write to the
 # repo root during manual testing — never intentional output, never shipped.

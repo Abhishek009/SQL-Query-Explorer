@@ -13,6 +13,18 @@ import { importDataFromFile } from './importData';
 import { initDuckdbRuntime } from './engines/duckdb/duckdbRuntime';
 import { initSqliteRuntime } from './engines/sqlite/sqliteRuntime';
 import { initSnowflakeRuntime } from './engines/snowflake/snowflakeRuntime';
+import { HistoryStore } from './queryHistoryStore';
+import { SavedQueryStore } from './savedQueryStore';
+import { HistoryTreeItem, HistoryTreeProvider } from './historyExplorer';
+import { SavedQueryTreeItem, SavedQueriesTreeProvider } from './savedQueriesExplorer';
+import {
+    historyClearAll, historyClearConnection, historyClearSearch, historyCopySql, historyOpenInEditor,
+    historyRemoveEntry, historyRunEntry, historySaveAsFavorite, historySearch,
+    saveCurrentQuery, savedQueryDelete, savedQueryDuplicate, savedQueryFolderDelete, savedQueryFolderRename,
+    savedQueryInsertIntoEditor, savedQueryMove, savedQueryNew, savedQueryNewFolder, savedQueryOpenInEditor,
+    savedQueryRename, savedQueryRun
+} from './queryLibraryCommands';
+import { SqlFormattingProvider, formatActiveQuery } from './formatting';
 
 export function activate(context: vscode.ExtensionContext): void {
     initDuckdbRuntime(context);
@@ -25,6 +37,10 @@ export function activate(context: vscode.ExtensionContext): void {
     const tabs = new ResultsTabs(context.secrets);
     const completions = new SqlCompletionProvider(store, context.secrets, scope);
     const running = new RunningQueryRegistry();
+    const history = new HistoryStore(context);
+    const savedQueries = new SavedQueryStore();
+    const historyProvider = new HistoryTreeProvider(history, store);
+    const savedQueriesProvider = new SavedQueriesTreeProvider(savedQueries, store);
     void store.migrateLegacyConnection();
 
     context.subscriptions.push(
@@ -39,13 +55,16 @@ export function activate(context: vscode.ExtensionContext): void {
             canSelectMany: true,
             showCollapseAll: true
         }),
+        vscode.window.createTreeView('sqlExplorerHistory', { treeDataProvider: historyProvider }),
+        vscode.window.createTreeView('sqlExplorerSavedQueries', { treeDataProvider: savedQueriesProvider, showCollapseAll: true }),
         tabs,
         vscode.languages.registerCodeLensProvider({ language: 'sql' }, status),
+        vscode.languages.registerDocumentFormattingEditProvider({ language: 'sql' }, new SqlFormattingProvider(store, scope)),
         vscode.workspace.onDidCloseTextDocument(document => { status.forget(document.uri); scope.forget(document.uri); }),
         scope.onDidChange(() => { status.refresh(); completions.clear(); }),
         // Reapply after a split, tab switch, or reopen; decorations are per editor.
         vscode.window.onDidChangeVisibleTextEditors(() => status.decorate()),
-        store.onDidChange(() => provider.refresh()),
+        store.onDidChange(() => { provider.refresh(); historyProvider.refresh(); savedQueriesProvider.refresh(); }),
         vscode.workspace.onDidChangeConfiguration(event => {
             if (event.affectsConfiguration('sqlExplorer.connections')) { provider.refresh(); }
         })
@@ -133,16 +152,44 @@ export function activate(context: vscode.ExtensionContext): void {
         await dropTable(store, context.secrets, provider, tabs, running, item);
     });
     register('sqlExplorer.openQuery', async () => { await openSqlQueryEditor(store, context.secrets); });
-    register('sqlExplorer.runActiveSql', async () => { await runActiveSql(store, context.secrets, status, tabs, running, scope); });
+    register('sqlExplorer.runActiveSql', async () => { await runActiveSql(store, context.secrets, status, tabs, running, scope, history); });
     register('sqlExplorer.runStatement', async (args?: { uri?: string; sql?: string; line?: number }) => {
-        await runStatement(store, context.secrets, status, tabs, running, args, false, scope);
+        await runStatement(store, context.secrets, status, tabs, running, args, false, scope, history);
     });
     register('sqlExplorer.runStatementNewTab', async (args?: { uri?: string; sql?: string; line?: number }) => {
-        await runStatement(store, context.secrets, status, tabs, running, args, true, scope);
+        await runStatement(store, context.secrets, status, tabs, running, args, true, scope, history);
     });
     register('sqlExplorer.selectQueryConnection', async (uri?: string) => { await selectQueryConnection(store, scope, uri); });
     register('sqlExplorer.selectQueryDatabase', async (uri?: string) => { await selectQueryDatabase(store, context.secrets, scope, uri); });
     register('sqlExplorer.cancelQuery', async () => { await cancelRunningQuery(running); });
+
+    register('sqlExplorer.historyRunEntry', async (item?: HistoryTreeItem) => {
+        await historyRunEntry(store, context.secrets, running, tabs, history, item);
+    });
+    register('sqlExplorer.historyOpenInEditor', async (item?: HistoryTreeItem) => { await historyOpenInEditor(store, item); });
+    register('sqlExplorer.historyCopySql', async (item?: HistoryTreeItem) => { await historyCopySql(item); });
+    register('sqlExplorer.historySaveAsFavorite', async (item?: HistoryTreeItem) => { await historySaveAsFavorite(savedQueries, item); });
+    register('sqlExplorer.historyRemoveEntry', async (item?: HistoryTreeItem) => { await historyRemoveEntry(history, item); });
+    register('sqlExplorer.historyClearConnection', async (item?: HistoryTreeItem) => { await historyClearConnection(history, item); });
+    register('sqlExplorer.historyClearAll', async () => { await historyClearAll(history); });
+    register('sqlExplorer.historySearch', async () => { await historySearch(historyProvider); });
+    register('sqlExplorer.historyClearSearch', async () => { await historyClearSearch(historyProvider); });
+
+    register('sqlExplorer.savedQueryRun', async (item?: SavedQueryTreeItem) => {
+        await savedQueryRun(store, context.secrets, running, tabs, history, item);
+    });
+    register('sqlExplorer.savedQueryOpenInEditor', async (item?: SavedQueryTreeItem) => { await savedQueryOpenInEditor(store, item); });
+    register('sqlExplorer.savedQueryInsertIntoEditor', async (item?: SavedQueryTreeItem) => { await savedQueryInsertIntoEditor(item); });
+    register('sqlExplorer.savedQueryRename', async (item?: SavedQueryTreeItem) => { await savedQueryRename(savedQueries, item); });
+    register('sqlExplorer.savedQueryMove', async (item?: SavedQueryTreeItem) => { await savedQueryMove(savedQueries, item); });
+    register('sqlExplorer.savedQueryDuplicate', async (item?: SavedQueryTreeItem) => { await savedQueryDuplicate(savedQueries, item); });
+    register('sqlExplorer.savedQueryDelete', async (item?: SavedQueryTreeItem) => { await savedQueryDelete(savedQueries, item); });
+    register('sqlExplorer.savedQueryNew', async (item?: SavedQueryTreeItem) => { await savedQueryNew(savedQueries, item); });
+    register('sqlExplorer.savedQueryNewFolder', async (item?: SavedQueryTreeItem) => { await savedQueryNewFolder(savedQueries, item); });
+    register('sqlExplorer.savedQueryFolderRename', async (item?: SavedQueryTreeItem) => { await savedQueryFolderRename(savedQueries, item); });
+    register('sqlExplorer.savedQueryFolderDelete', async (item?: SavedQueryTreeItem) => { await savedQueryFolderDelete(savedQueries, item); });
+    register('sqlExplorer.saveCurrentQuery', async () => { await saveCurrentQuery(savedQueries, scope); });
+    register('sqlExplorer.formatQuery', async () => { await formatActiveQuery(store, scope); });
 }
 
 export function deactivate(): void {}

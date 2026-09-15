@@ -10,6 +10,7 @@ import { ResultsSurface, ResultsTabs } from './resultsView';
 import { QueryStatusProvider } from './queryStatus';
 import { QueryScope } from './queryScope';
 import { RunningQueryRegistry } from './runningQueries';
+import { HistoryStore } from './queryHistoryStore';
 import { ConnectionMessage, RuntimeEngine, connectionFormHtml, isBrowseFileMessage, isCheckRuntimeMessage, isConnectionMessage, isCreateFileMessage, isExpandHostMessage, isInstallRuntimeMessage, parseMaxRows, validateConnection } from './connectionForm';
 import { createEmptyDatabase } from './engines/sqlite/sqliteClient';
 import { isSqliteInstalled, installSqlite } from './engines/sqlite/sqliteRuntime';
@@ -209,7 +210,7 @@ export async function openSqlQueryEditor(store: ConnectionStore, secrets: vscode
  * and changes the scope, and an unmarked file runs on the active connection —
  * but it keeps a saved script readable and portable.
  */
-function scopeHeader(connection: StoredConnection, catalog: string | undefined): string {
+export function scopeHeader(connection: StoredConnection, catalog: string | undefined): string {
     const lines = [`-- Connection: ${connection.name}`];
     if (addressesByDatabase(engineOf(connection)) && catalog) { lines.push(`-- Database: ${catalog}`); }
     return `${lines.join('\n')}\n`;
@@ -266,7 +267,7 @@ function documentFor(uri?: string): vscode.TextDocument | undefined {
     return vscode.window.activeTextEditor?.document;
 }
 
-export async function runActiveSql(store: ConnectionStore, secrets: vscode.SecretStorage, status: QueryStatusProvider, tabs: ResultsTabs, registry: RunningQueryRegistry, scope: QueryScope): Promise<void> {
+export async function runActiveSql(store: ConnectionStore, secrets: vscode.SecretStorage, status: QueryStatusProvider, tabs: ResultsTabs, registry: RunningQueryRegistry, scope: QueryScope, history: HistoryStore): Promise<void> {
     const editor = vscode.window.activeTextEditor;
     if (!editor || editor.document.languageId !== 'sql') {
         vscode.window.showErrorMessage('Open a SQL query editor before running a query.');
@@ -278,7 +279,7 @@ export async function runActiveSql(store: ConnectionStore, secrets: vscode.Secre
     // first non-empty line when the whole editor is executed.
     const line = selectedSql ? editor.selection.start.line : firstStatementLine(editor.document);
     await executeSql({
-        store, secrets, status, registry, scope, surface: tabs.primary(tabTitle(sql)),
+        store, secrets, status, registry, scope, history, surface: tabs.primary(tabTitle(sql)),
         sql, line, uri: editor.document.uri, document: editor.document
     });
 }
@@ -289,6 +290,7 @@ export interface ExecuteRequest {
     status: QueryStatusProvider;
     registry: RunningQueryRegistry;
     scope: QueryScope;
+    history: HistoryStore;
     /** Where the grid is drawn: the shared panel, or a dedicated tab. */
     surface: ResultsSurface;
     sql: string;
@@ -300,7 +302,7 @@ export interface ExecuteRequest {
 
 /** One execution path for every entry point, so timing and errors stay uniform. */
 export async function executeSql(request: ExecuteRequest): Promise<void> {
-    const { store, secrets, status, registry, scope, surface, sql, line, uri, document } = request;
+    const { store, secrets, status, registry, scope, history, surface, sql, line, uri, document } = request;
     // The editor's own scope wins; falling back to the active connection means a
     // plain .sql file with no header still runs.
     const resolved = document ? scope.resolve(document) : {};
@@ -323,6 +325,10 @@ export async function executeSql(request: ExecuteRequest): Promise<void> {
             milliseconds: elapsed,
             executedAt: Date.now()
         });
+        await history.record({
+            connectionId: connection.id, connectionName: connection.name, database, sql,
+            executedAt: Date.now(), milliseconds: elapsed, rowCount: result.rows.length, success: true
+        });
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         status.record(uri, { line, milliseconds: Date.now() - started, rows: 0, error: summarize(message) });
@@ -331,6 +337,10 @@ export async function executeSql(request: ExecuteRequest): Promise<void> {
             sql,
             message,
             details: error instanceof TrinoRequestError ? error.details : undefined
+        });
+        await history.record({
+            connectionId: connection.id, connectionName: connection.name, database, sql,
+            executedAt: Date.now(), success: false, error: message
         });
     }
 }
@@ -342,9 +352,10 @@ export async function runStatement(
     status: QueryStatusProvider,
     tabs: ResultsTabs,
     registry: RunningQueryRegistry,
-    args?: { uri?: string; sql?: string; line?: number },
-    newTab = false,
-    scope?: QueryScope
+    args: { uri?: string; sql?: string; line?: number } | undefined,
+    newTab: boolean,
+    scope: QueryScope | undefined,
+    history: HistoryStore
 ): Promise<void> {
     if (!args?.sql || !args.uri || !scope) { return; }
     const title = tabTitle(args.sql);
@@ -352,7 +363,7 @@ export async function runStatement(
     // The lens carries only the one statement, so the scope lives on the document.
     const document = vscode.workspace.textDocuments.find(open => open.uri.toString() === args.uri);
     await executeSql({
-        store, secrets, status, registry, scope, surface,
+        store, secrets, status, registry, scope, history, surface,
         sql: args.sql, line: args.line ?? 0, uri: vscode.Uri.parse(args.uri), document
     });
 }

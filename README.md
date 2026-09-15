@@ -194,6 +194,7 @@ Details:
 - **Autocomplete from live metadata** — typing `tpch.` suggests schemas, `tpch.sf1.` suggests tables, and `tpch.sf1.customer.` suggests columns with their types. Results are cached briefly and refresh with the connection.
 - **Execution feedback in the editor**: a timing line above the statement (`✓ 619ms · 1,500 row(s)`) plus a green tick or red cross in the gutter.
 - Long-running statements show a cancellable progress indicator and abort the underlying request when cancelled.
+- **SQL: Format Query** reindents and re-cases the selection (or the whole editor if nothing is selected), using the SQL dialect of whichever connection the editor is scoped to — PostgreSQL, MySQL/MariaDB, SQLite, DuckDB, Snowflake, and Trino each get their own rules; MongoDB queries are left alone since they aren't SQL. Also registered as VS Code's formatter for `.sql` files, so `Format Document` (`Shift+Alt+F`) and `editor.formatOnSave` work too — add `"[sql]": { "editor.formatOnSave": true }` to your settings to format automatically. Indentation follows the editor's own tab size; keyword casing follows `sqlExplorer.format.keywordCase`.
 
 #### Per-editor connection and database
 
@@ -227,6 +228,12 @@ Results open in an editor tab beside your query. `Run` reuses one tab; `New Tab`
 ### Row cap
 Queries without a `LIMIT` could otherwise pull an entire table into memory. The extension stops fetching at `sqlExplorer.query.maxRows` (default 10,000), **cancels the query on the coordinator**, and shows a banner so truncation is never silent. Any connection can override the cap in its own settings.
 
+### Query history and saved queries
+Two views live below Connections in the sidebar, so an ad-hoc query is never lost once you've run it once.
+
+- **History** records every statement run from a SQL editor (`Run SQL Query` / `Run Statement`), success or failure, grouped by connection with the newest first. Click an entry to run it again, or right-click for **Open in Editor**, **Copy SQL**, **Save as Favorite…**, or **Remove from History**. The search icon filters by SQL text across every connection. Kept locally per machine — not something to sync as a setting — and capped at `sqlExplorer.history.limit` entries per connection (default 500, oldest dropped first).
+- **Saved Queries** are named, organized into folders you create with **New Folder**, and persist as ordinary settings so they carry over with Settings Sync. Save the current SQL editor with the **Save** icon in its title bar (`SQL: Save Current Query…`) — re-saving into the same editor updates that same entry instead of creating a duplicate. From the tree, a query can be run, opened in an editor, inserted into whatever editor is active, renamed, moved to another folder, duplicated, or deleted; a folder can be renamed or deleted (which removes everything nested inside it, after confirming).
+
 ### Commands
 
 | Command | Description |
@@ -248,6 +255,12 @@ Queries without a `LIMIT` could otherwise pull an entire table into memory. The 
 | `SQL: Run Statement in New Tab` | Run one statement into its own results tab. |
 | `SQL: Select Connection for This Query` | Point the current editor at a different connection, without changing the active one. |
 | `SQL: Select Catalog or Database for This Query` | Switch the catalog (Trino) or database (PostgreSQL/Supabase/SQLite) the current editor runs against. |
+| `SQL: Save Current Query…` | Save the active SQL editor's selection (or whole contents) as a saved query. |
+| `SQL: New Saved Query…` | Create a saved query and open it for editing. |
+| `SQL: New Saved Query Folder…` | Create a folder to organize saved queries into. |
+| `SQL: Search Query History` | Filter the History view by SQL text. |
+| `SQL: Clear All Query History` | Remove every recorded history entry. |
+| `SQL: Format Query` | Reformat the selection, or the whole editor, for the connection's SQL dialect. |
 
 ### Settings
 
@@ -256,6 +269,9 @@ Queries without a `LIMIT` could otherwise pull an entire table into memory. The 
 | `sqlExplorer.connections` | `[]` | Saved connections. Managed by the Connections view; passwords are kept in Secret Storage, not here. |
 | `sqlExplorer.query.maxRows` | `10000` | Hard cap on rows fetched for any statement. A connection can override it. |
 | `sqlExplorer.preview.rowLimit` | `100` | Rows shown in the results grid, and fetched for a table preview. |
+| `sqlExplorer.history.limit` | `500` | Maximum history entries kept per connection. |
+| `sqlExplorer.format.keywordCase` | `upper` | Keyword casing for `SQL: Format Query` / format-on-save: `upper`, `lower`, or `preserve`. |
+| `sqlExplorer.savedQueries` | `[]` | Saved queries. Managed by the Saved Queries view. |
 
 Settings previously named `trino.*` are deprecated but still read: values are migrated into the `sqlExplorer.*` keys automatically on first run, and saved passwords are kept.
 
@@ -275,7 +291,6 @@ Settings previously named `trino.*` are deprecated but still read: values are mi
 
 ## Roadmap
 
-- **Query history and saved queries** — persist previously run statements, re-run them, and bookmark favourites.
 - **Enterprise authentication** — OAuth2, JWT, and Kerberos beyond the current user and password.
 - **Natural ordering for text sorts** — restore `item9` before `item10` for text columns without the performance cost.
 

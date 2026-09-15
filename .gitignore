@@ -49,6 +49,9 @@ temp/
 *.tmp
 *.bak
 
+# Local project notes for Claude Code sessions — not for the repo
+.claude-project-notes.md
+
 # Optional local caches for the SQLite/DuckDB/Snowflake integration tests —
 # not required to run the suite (those tests skip themselves without them);
 # populate with `npm install better-sqlite3 --prefix .sqlite-test-cache` /
@@ -60,3 +63,4 @@ temp/
 test/engines/mongodbUrls.test.ts
 test/snowflakeConnection.test.ts
 test/connectionForm.test.ts
+scripts/install-local.sh

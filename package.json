@@ -145,6 +145,108 @@
       {
         "command": "sqlExplorer.selectQueryDatabase",
         "title": "SQL: Select Catalog or Database for This Query"
+      },
+      {
+        "command": "sqlExplorer.saveCurrentQuery",
+        "title": "SQL: Save Current Query…",
+        "icon": "$(save)"
+      },
+      {
+        "command": "sqlExplorer.formatQuery",
+        "title": "SQL: Format Query"
+      },
+      {
+        "command": "sqlExplorer.historyRunEntry",
+        "title": "Run Query"
+      },
+      {
+        "command": "sqlExplorer.historyOpenInEditor",
+        "title": "Open in Editor",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "sqlExplorer.historyCopySql",
+        "title": "Copy SQL",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "sqlExplorer.historySaveAsFavorite",
+        "title": "Save as Favorite…",
+        "icon": "$(star-add)"
+      },
+      {
+        "command": "sqlExplorer.historyRemoveEntry",
+        "title": "Remove from History",
+        "icon": "$(close)"
+      },
+      {
+        "command": "sqlExplorer.historyClearConnection",
+        "title": "Clear History for This Connection",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "sqlExplorer.historyClearAll",
+        "title": "SQL: Clear All Query History",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "sqlExplorer.historySearch",
+        "title": "SQL: Search Query History",
+        "icon": "$(search)"
+      },
+      {
+        "command": "sqlExplorer.historyClearSearch",
+        "title": "Clear History Search",
+        "icon": "$(search-stop)"
+      },
+      {
+        "command": "sqlExplorer.savedQueryRun",
+        "title": "Run Query"
+      },
+      {
+        "command": "sqlExplorer.savedQueryOpenInEditor",
+        "title": "Open in Editor",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "sqlExplorer.savedQueryInsertIntoEditor",
+        "title": "Insert into Active Editor"
+      },
+      {
+        "command": "sqlExplorer.savedQueryRename",
+        "title": "Rename…"
+      },
+      {
+        "command": "sqlExplorer.savedQueryMove",
+        "title": "Move to Folder…"
+      },
+      {
+        "command": "sqlExplorer.savedQueryDuplicate",
+        "title": "Duplicate"
+      },
+      {
+        "command": "sqlExplorer.savedQueryDelete",
+        "title": "Delete",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "sqlExplorer.savedQueryNew",
+        "title": "SQL: New Saved Query…",
+        "icon": "$(add)"
+      },
+      {
+        "command": "sqlExplorer.savedQueryNewFolder",
+        "title": "SQL: New Saved Query Folder…",
+        "icon": "$(new-folder)"
+      },
+      {
+        "command": "sqlExplorer.savedQueryFolderRename",
+        "title": "Rename Folder…"
+      },
+      {
+        "command": "sqlExplorer.savedQueryFolderDelete",
+        "title": "Delete Folder…",
+        "icon": "$(trash)"
       }
     ],
     "configuration": {
@@ -308,6 +410,81 @@
           "maximum": 10000,
           "markdownDeprecationMessage": "Superseded by `#sqlExplorer.preview.rowLimit#`. Existing values are migrated automatically."
         },
+        "sqlExplorer.history.limit": {
+          "type": "number",
+          "default": 500,
+          "minimum": 1,
+          "maximum": 10000,
+          "description": "Maximum number of past queries kept per connection in the History view. Oldest entries drop off past this."
+        },
+        "sqlExplorer.savedQueries": {
+          "type": "array",
+          "default": [],
+          "description": "Named queries shown in the Saved Queries view. Managed by that view — hand-editing is supported but not required.",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "name",
+              "sql",
+              "createdAt",
+              "updatedAt"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Stable identifier for the saved query."
+              },
+              "name": {
+                "type": "string",
+                "description": "Display name shown in the Saved Queries view."
+              },
+              "sql": {
+                "type": "string",
+                "description": "The query text."
+              },
+              "folder": {
+                "type": "string",
+                "description": "Slash-separated folder path, e.g. \"Reports/Weekly\". Absent means the root."
+              },
+              "connectionId": {
+                "type": "string",
+                "description": "The connection this was written for. Falls back to the active connection if it no longer exists."
+              },
+              "database": {
+                "type": "string",
+                "description": "The catalog/database it ran against, for engines that address one."
+              },
+              "createdAt": {
+                "type": "number",
+                "description": "When this was first saved, in epoch milliseconds."
+              },
+              "updatedAt": {
+                "type": "number",
+                "description": "When this was last saved, in epoch milliseconds."
+              }
+            }
+          }
+        },
+        "sqlExplorer.savedQueryFolders": {
+          "type": "array",
+          "default": [],
+          "description": "Folders in the Saved Queries view that have no query directly or transitively in them yet. Managed by that view.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "sqlExplorer.format.keywordCase": {
+          "type": "string",
+          "enum": ["upper", "lower", "preserve"],
+          "enumDescriptions": [
+            "SELECT, FROM, WHERE, …",
+            "select, from, where, …",
+            "Leave keyword casing exactly as typed"
+          ],
+          "default": "upper",
+          "description": "How SQL: Format Query and format-on-save case keywords. Indentation follows the editor's own tab size/spaces setting."
+        },
         "trino.connection.name": {
           "type": "string",
           "default": "Trino Connection",
@@ -349,6 +526,18 @@
         {
           "id": "sqlExplorerConnections",
           "name": "Connections",
+          "icon": "resources/trino.svg",
+          "contextualTitle": "SQL Query Explorer"
+        },
+        {
+          "id": "sqlExplorerSavedQueries",
+          "name": "Saved Queries",
+          "icon": "resources/trino.svg",
+          "contextualTitle": "SQL Query Explorer"
+        },
+        {
+          "id": "sqlExplorerHistory",
+          "name": "History",
           "icon": "resources/trino.svg",
           "contextualTitle": "SQL Query Explorer"
         }
@@ -405,6 +594,74 @@
         {
           "command": "sqlExplorer.selectQueryDatabase",
           "when": "editorLangId == sql"
+        },
+        {
+          "command": "sqlExplorer.saveCurrentQuery",
+          "when": "editorLangId == sql"
+        },
+        {
+          "command": "sqlExplorer.formatQuery",
+          "when": "editorLangId == sql"
+        },
+        {
+          "command": "sqlExplorer.historyRunEntry",
+          "when": "false"
+        },
+        {
+          "command": "sqlExplorer.historyOpenInEditor",
+          "when": "false"
+        },
+        {
+          "command": "sqlExplorer.historyCopySql",
+          "when": "false"
+        },
+        {
+          "command": "sqlExplorer.historySaveAsFavorite",
+          "when": "false"
+        },
+        {
+          "command": "sqlExplorer.historyRemoveEntry",
+          "when": "false"
+        },
+        {
+          "command": "sqlExplorer.historyClearConnection",
+          "when": "false"
+        },
+        {
+          "command": "sqlExplorer.savedQueryRun",
+          "when": "false"
+        },
+        {
+          "command": "sqlExplorer.savedQueryOpenInEditor",
+          "when": "false"
+        },
+        {
+          "command": "sqlExplorer.savedQueryInsertIntoEditor",
+          "when": "false"
+        },
+        {
+          "command": "sqlExplorer.savedQueryRename",
+          "when": "false"
+        },
+        {
+          "command": "sqlExplorer.savedQueryMove",
+          "when": "false"
+        },
+        {
+          "command": "sqlExplorer.savedQueryDuplicate",
+          "when": "false"
+        },
+        {
+          "command": "sqlExplorer.savedQueryDelete",
+          "when": "false"
+        },
+        {
+          "command": "sqlExplorer.savedQueryFolderRename",
+          "when": "false"
+        },
+        {
+          "command": "sqlExplorer.savedQueryFolderDelete",
+          "when": "false"
         }
       ],
       "view/title": [
@@ -422,6 +679,31 @@
           "command": "sqlExplorer.refreshCatalogs",
           "when": "view == sqlExplorerConnections",
           "group": "navigation@3"
+        },
+        {
+          "command": "sqlExplorer.savedQueryNew",
+          "when": "view == sqlExplorerSavedQueries",
+          "group": "navigation@1"
+        },
+        {
+          "command": "sqlExplorer.savedQueryNewFolder",
+          "when": "view == sqlExplorerSavedQueries",
+          "group": "navigation@2"
+        },
+        {
+          "command": "sqlExplorer.historySearch",
+          "when": "view == sqlExplorerHistory && !sqlExplorer.historyFiltered",
+          "group": "navigation@1"
+        },
+        {
+          "command": "sqlExplorer.historyClearSearch",
+          "when": "view == sqlExplorerHistory && sqlExplorer.historyFiltered",
+          "group": "navigation@1"
+        },
+        {
+          "command": "sqlExplorer.historyClearAll",
+          "when": "view == sqlExplorerHistory",
+          "group": "navigation@2"
         }
       ],
       "view/item/context": [
@@ -499,11 +781,116 @@
           "command": "sqlExplorer.removeConnection",
           "when": "view == sqlExplorerConnections && viewItem =~ /^sqlExplorer\\.connection/",
           "group": "2_manage@2"
+        },
+        {
+          "command": "sqlExplorer.historyOpenInEditor",
+          "when": "view == sqlExplorerHistory && viewItem == sqlExplorer.history.entry",
+          "group": "inline@1"
+        },
+        {
+          "command": "sqlExplorer.historyRunEntry",
+          "when": "view == sqlExplorerHistory && viewItem == sqlExplorer.history.entry",
+          "group": "1_run@1"
+        },
+        {
+          "command": "sqlExplorer.historyOpenInEditor",
+          "when": "view == sqlExplorerHistory && viewItem == sqlExplorer.history.entry",
+          "group": "1_run@2"
+        },
+        {
+          "command": "sqlExplorer.historyCopySql",
+          "when": "view == sqlExplorerHistory && viewItem == sqlExplorer.history.entry",
+          "group": "1_run@3"
+        },
+        {
+          "command": "sqlExplorer.historySaveAsFavorite",
+          "when": "view == sqlExplorerHistory && viewItem == sqlExplorer.history.entry",
+          "group": "2_save@1"
+        },
+        {
+          "command": "sqlExplorer.historyRemoveEntry",
+          "when": "view == sqlExplorerHistory && viewItem == sqlExplorer.history.entry",
+          "group": "8_destructive@1"
+        },
+        {
+          "command": "sqlExplorer.historyClearConnection",
+          "when": "view == sqlExplorerHistory && viewItem == sqlExplorer.history.group",
+          "group": "8_destructive@1"
+        },
+        {
+          "command": "sqlExplorer.savedQueryRun",
+          "when": "view == sqlExplorerSavedQueries && viewItem == sqlExplorer.savedQuery.query",
+          "group": "inline@1"
+        },
+        {
+          "command": "sqlExplorer.savedQueryRun",
+          "when": "view == sqlExplorerSavedQueries && viewItem == sqlExplorer.savedQuery.query",
+          "group": "1_run@1"
+        },
+        {
+          "command": "sqlExplorer.savedQueryOpenInEditor",
+          "when": "view == sqlExplorerSavedQueries && viewItem == sqlExplorer.savedQuery.query",
+          "group": "1_run@2"
+        },
+        {
+          "command": "sqlExplorer.savedQueryInsertIntoEditor",
+          "when": "view == sqlExplorerSavedQueries && viewItem == sqlExplorer.savedQuery.query",
+          "group": "1_run@3"
+        },
+        {
+          "command": "sqlExplorer.savedQueryRename",
+          "when": "view == sqlExplorerSavedQueries && viewItem == sqlExplorer.savedQuery.query",
+          "group": "2_manage@1"
+        },
+        {
+          "command": "sqlExplorer.savedQueryMove",
+          "when": "view == sqlExplorerSavedQueries && viewItem == sqlExplorer.savedQuery.query",
+          "group": "2_manage@2"
+        },
+        {
+          "command": "sqlExplorer.savedQueryDuplicate",
+          "when": "view == sqlExplorerSavedQueries && viewItem == sqlExplorer.savedQuery.query",
+          "group": "2_manage@3"
+        },
+        {
+          "command": "sqlExplorer.savedQueryDelete",
+          "when": "view == sqlExplorerSavedQueries && viewItem == sqlExplorer.savedQuery.query",
+          "group": "8_destructive@1"
+        },
+        {
+          "command": "sqlExplorer.savedQueryNew",
+          "when": "view == sqlExplorerSavedQueries && viewItem == sqlExplorer.savedQuery.folder",
+          "group": "inline@1"
+        },
+        {
+          "command": "sqlExplorer.savedQueryNew",
+          "when": "view == sqlExplorerSavedQueries && viewItem == sqlExplorer.savedQuery.folder",
+          "group": "1_run@1"
+        },
+        {
+          "command": "sqlExplorer.savedQueryNewFolder",
+          "when": "view == sqlExplorerSavedQueries && viewItem == sqlExplorer.savedQuery.folder",
+          "group": "1_run@2"
+        },
+        {
+          "command": "sqlExplorer.savedQueryFolderRename",
+          "when": "view == sqlExplorerSavedQueries && viewItem == sqlExplorer.savedQuery.folder",
+          "group": "2_manage@1"
+        },
+        {
+          "command": "sqlExplorer.savedQueryFolderDelete",
+          "when": "view == sqlExplorerSavedQueries && viewItem == sqlExplorer.savedQuery.folder",
+          "group": "8_destructive@1"
         }
       ],
       "editor/title": [
         {
           "command": "sqlExplorer.runActiveSql",
+          "when": "resourceLangId == sql",
+          "group": "navigation"
+        },
+        {
+          "command": "sqlExplorer.saveCurrentQuery",
           "when": "resourceLangId == sql",
           "group": "navigation"
         }
@@ -526,7 +913,8 @@
     "compile": "tsc -p ./",
     "watch": "node esbuild.mjs --watch",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "install-local": "bash scripts/install-local.sh"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
@@ -543,6 +931,7 @@
     "mongodb": "^7.5.0",
     "mysql2": "^3.23.3",
     "pg": "^8.22.0",
+    "sql-formatter": "^15.8.2",
     "undici": "^8.10.0"
   }
 }
